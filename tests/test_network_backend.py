@@ -196,5 +196,25 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(fake.calls[-1][-4:], ["modify", "netpanel-sta-new", "connection.id", "netpanel-sta"])
 
 
+
+class PermissionMessageTests(unittest.TestCase):
+    def test_insufficient_privileges_gets_hint(self):
+        def deny(args, **kw):
+            raise CommandError(" ".join(args), 1, stderr="Error: Failed to add 'netpanel-sta-new' connection: Insufficient privileges")
+        with mock.patch.object(N, "run", deny):
+            with self.assertRaises(CommandError) as cm:
+                N.NetworkBackend()._nm("connection", "add")
+        self.assertIn("Insufficient privileges", cm.exception.message)
+        self.assertIn("check-permissions.sh --fix", cm.exception.message)
+
+    def test_other_errors_unchanged(self):
+        def boom(args, **kw):
+            raise CommandError(" ".join(args), 1, stderr="Error: Connection activation failed: No network with SSID 'x' found.")
+        with mock.patch.object(N, "run", boom):
+            with self.assertRaises(CommandError) as cm:
+                N.NetworkBackend()._nm("connection", "up", "x")
+        self.assertNotIn("check-permissions", cm.exception.message)
+
+
 if __name__ == "__main__":
     unittest.main()

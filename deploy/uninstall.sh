@@ -15,7 +15,7 @@ rm -f /etc/systemd/system/netpanel.service /etc/systemd/system/netpanel-kiosk.se
 rm -f /etc/X11/xorg.conf.d/99-netpanel-fbdev.conf
 [ -f /etc/X11/Xwrapper.config.netpanel-bak ] && mv /etc/X11/Xwrapper.config.netpanel-bak /etc/X11/Xwrapper.config
 rm -f /etc/pam.d/netpanel /etc/sudoers.d/netpanel /usr/local/sbin/netpanel-ts-routes /usr/local/sbin/netpanel-passwd
-rm -f /etc/polkit-1/rules.d/50-netpanel.rules /etc/polkit-1/localauthority/50-local.d/50-netpanel.pkla
+rm -f /etc/polkit-1/rules.d/10-netpanel.rules /etc/polkit-1/rules.d/50-netpanel.rules /etc/polkit-1/localauthority/50-local.d/50-netpanel.pkla
 systemctl daemon-reload
 systemctl enable getty@tty1.service >/dev/null 2>&1 || true
 
