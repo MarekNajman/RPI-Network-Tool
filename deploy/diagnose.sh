@@ -54,6 +54,7 @@ run "kmsprint 2>/dev/null | head -20 || echo '(kmsprint not available)'"
 sec "TOUCH / INPUT"
 run "grep -E '^N: Name|^H: Handlers' /proc/bus/input/devices"
 run "id netpanel 2>&1"
+LINES_MAX=90 run "bash '$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/check-touch.sh'"
 
 sec "PRIVILEGES (polkit / sudo) - same checks as deploy/check-permissions.sh"
 LINES_MAX=60 run "bash '$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/check-permissions.sh'"
