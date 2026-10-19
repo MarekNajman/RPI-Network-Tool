@@ -43,6 +43,7 @@ Všechny obrazovky jsou v [`docs/screenshots/`](docs/screenshots/) (vygenerovan�
 3. [Požadavky](#požadavky)
 4. [Instalace krok za krokem](#instalace-krok-za-krokem)
    - [Displej: KMS vs. legacy (černá obrazovka po instalaci)](#displej-kms-vs-legacy-černá-obrazovka-po-instalaci)
+   - [Oprávnění: „Insufficient privileges“](#oprávnění-insufficient-privileges)
 5. [Co přesně dělá instalátor](#co-přesně-dělá-instalátor)
 6. [Kiosk: služba po bootu, fullscreen, nejde zavřít](#kiosk-služba-po-bootu-fullscreen-nejde-zavřít)
 7. [Ovládání GUI](#ovládání-gui)
@@ -121,7 +122,8 @@ RPI-5inchLCD-Net/
 │   ├── display-kms.py            bezpečné zapnutí KMS driveru v config.txt (záloha, diff, restore)
 │   ├── kiosk.sh                  spouští Chromium v kiosk režimu
 │   ├── netpanel.pam              PAM session pro kiosk (přístup k displeji a dotyku)
-│   ├── 50-netpanel.rules         polkit: uživatel netpanel smí ovládat NetworkManager
+│   ├── 10-netpanel.rules         polkit: uživatel netpanel smí ovládat NetworkManager
+│   ├── check-permissions.sh      kontrola/oprava oprávnění („Insufficient privileges“)
 │   ├── 50-netpanel.pkla          totéž pro starší polkit (fallback)
 │   ├── netpanel.sudoers          sudo: jen /usr/local/sbin/netpanel-ts-routes
 │   ├── netpanel-ts-routes        root helper: validace + tailscale set --advertise-routes
@@ -368,6 +370,67 @@ ty prosvítají na konzoli, dokud kiosk neběží. Možnosti:
   (`disable` + `sudo systemctl set-default graphical.target`), nebo použij RealVNC ve virtuálním režimu
   (samostatná virtuální plocha) – to NetPanel nenastavuje.
 
+## Oprávnění: „Insufficient privileges“
+
+**Co hláška znamená:** GUI (služba `netpanel`, běží jako neprivilegovaný uživatel `netpanel`) požádala
+NetworkManager o změnu a ten ji odmítl. NetworkManager se u každé změny od ne-root uživatele ptá démona
+**polkit**, jestli smí. Ano říká pravidlo `/etc/polkit-1/rules.d/10-netpanel.rules`. Když hláška přijde,
+v tomhle řetězu něco chybí:
+
+```
+GUI → netpanel.service (uživatel netpanel) → nmcli → NetworkManager → polkit → pravidlo 10-netpanel.rules → ANO/NE
+```
+
+### Krok 1 – automatická kontrola (nic nemění)
+
+```bash
+sudo /opt/netpanel/deploy/check-permissions.sh
+```
+
+Projde 7 bodů a u každého napíše PASS/FAIL. Nejdůležitější je bod 4 – oprávnění, která NetworkManager
+**reálně** dává uživateli `netpanel` (stejný dotaz jako GUI):
+
+```bash
+sudo -u netpanel nmcli general permissions
+```
+
+| Hodnota | Význam |
+|---|---|
+| `yes` | povoleno – takhle to má být u všech `settings.modify.system`, `network-control`, `enable-disable-wifi`, `wifi.scan`, `wifi.share.*` |
+| `auth` | polkit by chtěl heslo admina → naše pravidlo se neuplatnilo (služba nemá jak heslo zadat → „Insufficient privileges“) |
+| `no` | zakázáno – pravidlo chybí, nebo jiné pravidlo odpovídá dřív „ne“ |
+
+### Krok 2 – automatická oprava
+
+```bash
+sudo /opt/netpanel/deploy/check-permissions.sh --fix
+```
+
+Doinstaluje polkit (pokud chybí), znovu nahraje pravidlo `10-netpanel.rules` i `.pkla` variantu pro starší polkit,
+smaže staré `50-netpanel.rules`, restartuje polkit, obnoví sudo pravidlo pro Tailscale a **znovu všechno
+zkontroluje**. Restart NetworkManageru ani rebootu není potřeba – zkus hned znovu Connect na panelu.
+
+### Krok 3 – když `--fix` nepomůže: ruční rozbor podle bodu, který padá
+
+| Padá bod | Co zkontrolovat | Oprava |
+|---|---|---|
+| 1 polkit neběží | `systemctl status polkit` | `sudo apt install polkitd && sudo systemctl enable --now polkit` |
+| 2 pravidlo | `ls -l /etc/polkit-1/rules.d/`, `journalctl -b -u polkit` (chyba v JS pravidle = pravidlo se ignoruje) | `--fix`; pravidlo musí být čitelné (0644) |
+| 2 + 4 `auth`/`no` | `grep -l NetworkManager /etc/polkit-1/rules.d/* /usr/share/polkit-1/rules.d/*` – jiné pravidlo může odpovědět dřív. Pravidla se vyhodnocují podle jména souboru (`10-` před `50-`) a první odpověď vyhrává. | naše pravidlo má `10-`, aby bylo první; pokud existuje ještě nižší číslo (`00-`…), podívej se, co dělá |
+| 3 `auth-polkit` | `NetworkManager --print-config \| grep auth-polkit` | řádek `auth-polkit=false` / `root-only` smaž z `/etc/NetworkManager/NetworkManager.conf` a `conf.d/*.conf`, pak `sudo systemctl restart NetworkManager` (síť na pár sekund spadne – pozor přes SSH) |
+| 5 sudo | `sudo -u netpanel sudo -n -l /usr/local/sbin/netpanel-ts-routes` | `--fix` (týká se jen Tailscale) |
+| 7 služba | `systemctl status netpanel` | `sudo systemctl restart netpanel` |
+
+Pořád nic? Pošli výstup:
+
+```bash
+sudo /opt/netpanel/deploy/check-permissions.sh
+journalctl -b -u netpanel -u polkit -u NetworkManager --no-pager | tail -n 80
+```
+
+> **Nedělej** obecně radu z internetu „`auth-polkit=false`“ v NetworkManager.conf – vypne kontrolu oprávnění
+> pro všechny uživatele systému. Je to zbytečně široké; stačí pravidlo jen pro `netpanel`.
+
 ## Co přesně dělá instalátor
 
 | Krok | Soubor / akce |
@@ -378,7 +441,7 @@ ty prosvítají na konzoli, dokud kiosk neběží. Možnosti:
 | Tailscale helper | `/usr/local/sbin/netpanel-ts-routes` (root, 0755) |
 | Admin PIN | `/usr/local/sbin/netpanel-passwd`; hash PINu v `/etc/netpanel/auth.json` (root:netpanel, 0640) |
 | sudo | `/etc/sudoers.d/netpanel` – **jediný** povolený příkaz: helper výše (ověřeno `visudo -c`) |
-| polkit | `/etc/polkit-1/rules.d/50-netpanel.rules` – netpanel smí akce `org.freedesktop.NetworkManager.*` |
+| polkit | `/etc/polkit-1/rules.d/10-netpanel.rules` (+ `.pkla` pro starší polkit) – netpanel smí akce `org.freedesktop.NetworkManager.*`; na konci instalace se oprávnění ověří (`check-permissions.sh`) |
 | PAM | `/etc/pam.d/netpanel` – session pro kiosk (logind přidělí displej + dotyk) |
 | sysctl | `/etc/sysctl.d/99-netpanel-ipforward.conf` – `net.ipv4.ip_forward=1`, `net.ipv6.conf.all.forwarding=1` |
 | Konfigurace | `/etc/default/netpanel` (při upgradu se nepřepisuje) |
@@ -568,7 +631,7 @@ python3 tools/screenshots.py                    # průchod UI + screenshoty (vy�
 | Na displeji „NetPanel service is not responding“ | `systemctl status netpanel`, `journalctl -u netpanel -e`. |
 | Dotyk nereaguje | `sudo libinput list-devices` – musí tam být touchscreen; zkontroluj kabel a `disable_touchscreen` v `config.txt`. |
 | cage startuje, ale displej zůstane černý | Pi 4 má dvě DRM zařízení (v3d a vc4). Pokud cage vybere špatné, přidej do `/etc/default/netpanel` řádek `WLR_DRM_DEVICES=/dev/dri/card1` (číslo karty s `DSI` v `ls /sys/class/drm`) a restartuj kiosk. |
-| Hlášky „Not authorized“ / „Insufficient privileges“ při ukládání sítě | polkit pravidlo: existuje `/etc/polkit-1/rules.d/50-netpanel.rules`? `sudo systemctl restart polkit`. |
+| Hlášky „Not authorized“ / „Insufficient privileges“ při ukládání sítě | Viz [Oprávnění: „Insufficient privileges“](#oprávnění-insufficient-privileges). Rychle: `sudo /opt/netpanel/deploy/check-permissions.sh --fix`. |
 | Wi-Fi „Blocked (rfkill)“ | Nenastavená země: `sudo raspi-config nonint do_wifi_country CZ`, `rfkill list`, reboot. |
 | AP běží, ale klienti se nepřipojí | Zkus 2,4 GHz kanál 1/6/11; telefon „zapomene“ síť a připojí se znovu; NetPanel vypíná PMF (známý problém brcmfmac). Log: `journalctl -u NetworkManager -b`. |
 | AP klienti mají IP, ale ne internet | eth0 musí mít funkční uplink (brána). NAT dělá NetworkManager (`ipv4.method shared`); ověř `cat /proc/sys/net/ipv4/ip_forward` = 1. |
