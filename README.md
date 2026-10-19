@@ -11,6 +11,9 @@ Přehledně ukazuje stav sítě a umožňuje ji nastavit přímo z displeje:
 - **Tailscale** – stav připojení a **Advertise subnet**: předvyplní subnet podle eth0 a po potvrzení provede
   `sudo tailscale set --advertise-routes=<síť>/<prefix>`.
 - Vlastní **on-screen klávesnice** (numerická pro IP adresy, QWERTY pro SSID/hesla) – v kiosku žádná systémová klávesnice není.
+- **Přihlášení PINem**: úvodní přehled je vidět bez hesla, každá další obrazovka (Ethernet, Wi-Fi, Tailscale)
+  vyžaduje admin PIN. Tlačítko **Logout** na úvodní obrazovce, **automatické odhlášení po 5 min nečinnosti**
+  (30 s předem varování), zámek po 5 špatných pokusech.
 - Běží jako **služba po bootu ve fullscreenu**; z dotykového displeje ji nejde zavřít ani minimalizovat.
 
 GUI je v angličtině, tato dokumentace v češtině.
@@ -22,6 +25,8 @@ GUI je v angličtině, tato dokumentace v češtině.
 | ![](docs/screenshots/02-ethernet-dhcp.png) | ![](docs/screenshots/07-wifi-station.png) | ![](docs/screenshots/14-ap-running.png) |
 | **Numerická klávesnice** | **QWERTY klávesnice** | **Tailscale – Advertise subnet** |
 | ![](docs/screenshots/04-keypad-ip.png) | ![](docs/screenshots/09-keyboard-text.png) | ![](docs/screenshots/18-tailscale-advertised.png) |
+| **Login (PIN)** | **Přihlášeno – Logout + odpočet** | **Varování před auto-logoutem** |
+| ![](docs/screenshots/21-login.png) | ![](docs/screenshots/23-home-logged-in.png) | ![](docs/screenshots/24-idle-warning.png) |
 
 Všechny obrazovky jsou v [`docs/screenshots/`](docs/screenshots/) (vygenerované v demo režimu, 800 × 480).
 
@@ -37,16 +42,18 @@ Všechny obrazovky jsou v [`docs/screenshots/`](docs/screenshots/) (vygenerovan�
 2. [Struktura projektu](#struktura-projektu)
 3. [Požadavky](#požadavky)
 4. [Instalace krok za krokem](#instalace-krok-za-krokem)
+   - [Displej: KMS vs. legacy (černá obrazovka po instalaci)](#displej-kms-vs-legacy-černá-obrazovka-po-instalaci)
 5. [Co přesně dělá instalátor](#co-přesně-dělá-instalátor)
 6. [Kiosk: služba po bootu, fullscreen, nejde zavřít](#kiosk-služba-po-bootu-fullscreen-nejde-zavřít)
 7. [Ovládání GUI](#ovládání-gui)
-8. [Bezpečnost a oprávnění](#bezpečnost-a-oprávnění)
-9. [Konfigurace](#konfigurace)
-10. [Vývoj a testy na PC (demo režim)](#vývoj-a-testy-na-pc-demo-režim)
-11. [Řešení problémů](#řešení-problémů)
-12. [Známá omezení a kritické poznámky](#známá-omezení-a-kritické-poznámky)
-13. [Aktualizace a odinstalace](#aktualizace-a-odinstalace)
-14. [Licence a zdroje](#licence-a-zdroje)
+8. [Přihlášení: admin PIN a automatické odhlášení](#přihlášení-admin-pin-a-automatické-odhlášení)
+9. [Bezpečnost a oprávnění](#bezpečnost-a-oprávnění)
+10. [Konfigurace](#konfigurace)
+11. [Vývoj a testy na PC (demo režim)](#vývoj-a-testy-na-pc-demo-režim)
+12. [Řešení problémů](#řešení-problémů)
+13. [Známá omezení a kritické poznámky](#známá-omezení-a-kritické-poznámky)
+14. [Aktualizace a odinstalace](#aktualizace-a-odinstalace)
+15. [Licence a zdroje](#licence-a-zdroje)
 
 ---
 
@@ -59,7 +66,7 @@ Všechny obrazovky jsou v [`docs/screenshots/`](docs/screenshots/) (vygenerovan�
  │          cage  ── Wayland kiosk kompozitor: 1 okno přes celý displej │
  │           └─ Chromium --kiosk http://127.0.0.1:8088                   │
  │                │  HTML/CSS/JS, ikony SVG, on-screen klávesnice         │
- │                ▼  JSON API (jen localhost)                            │
+ │                ▼  JSON API (jen localhost, změny jen s PIN session)   │
  │  netpanel.service (uživatel netpanel)                                 │
  │          python3 -m netpanel   ── jen standardní knihovna Pythonu     │
  │           ├─ nmcli ──────────▶ NetworkManager (povoleno polkit pravidlem)
@@ -77,6 +84,7 @@ Proč takhle:
 | **Webové UI v Chromiu** | Bohaté touch ovládání, ostré SVG ikony, žádné pip balíčky (backend je čistá stdlib Pythonu). Cena: Chromium ≈ 200–300 MB RAM. |
 | **cage** | Kiosk kompozitor – zobrazí jedinou aplikaci přes celý displej, nemá panely, tlačítka oken ani přepínání aplikací. |
 | **Neprivilegovaný uživatel `netpanel`** | GUI neběží jako root. NetworkManager povoluje polkit pravidlo, Tailscale jediný root helper přes sudo. |
+| **PIN kontroluje server, ne prohlížeč** | Bez platné session API odmítne vše kromě přehledu (`/api/status`) a loginu. Skrytí tlačítek v UI je jen kosmetika. |
 
 ## Struktura projektu
 
@@ -86,6 +94,8 @@ RPI-5inchLCD-Net/
 ├── netpanel/                     backend (Python 3.11 stdlib)
 │   ├── __main__.py               start: python3 -m netpanel [--demo]
 │   ├── server.py                 HTTP server, JSON API, statické soubory, bezpečnostní hlavičky
+│   ├── auth.py                   admin PIN: hash, session, zámek po špatných pokusech, idle timeout
+│   ├── passwd.py                 CLI pro nastavení PINu (volá ho netpanel-passwd)
 │   ├── validation.py             validace IP/masek/SSID/hesel/rout (autoritativní)
 │   ├── models.py                 datové struktury
 │   └── backend/
@@ -98,19 +108,24 @@ RPI-5inchLCD-Net/
 ├── web/                          frontend (bez frameworku)
 │   ├── index.html
 │   ├── css/app.css, css/icons.css
-│   ├── js/                       app.js (router), api.js, ui.js, keyboard.js, validate.js, pages/*.js
+│   ├── js/                       app.js (router), api.js, session.js, login.js, ui.js, keyboard.js, validate.js, pages/*.js
 │   ├── icons/*.svg               vlastní ikony (ethernet, wifi, AP, station, VPN, subnet, …)
 │   └── fonts/                    font Inter (SIL OFL 1.1)
 ├── deploy/
 │   ├── install.sh / uninstall.sh
 │   ├── netpanel.service          systemd: API server
-│   ├── netpanel-kiosk.service    systemd: cage + Chromium na tty1
+│   ├── netpanel-kiosk.service    systemd: cage + Chromium na tty1 (KMS)
+│   ├── netpanel-kiosk-x11.service  systemd: Xorg + Chromium na tty1 (legacy framebuffer)
+│   ├── kiosk-x11.sh, 99-netpanel-fbdev.conf  X11 varianta kiosku
+│   ├── diagnose.sh               diagnostika černé obrazovky / služeb
+│   ├── display-kms.py            bezpečné zapnutí KMS driveru v config.txt (záloha, diff, restore)
 │   ├── kiosk.sh                  spouští Chromium v kiosk režimu
 │   ├── netpanel.pam              PAM session pro kiosk (přístup k displeji a dotyku)
 │   ├── 50-netpanel.rules         polkit: uživatel netpanel smí ovládat NetworkManager
 │   ├── 50-netpanel.pkla          totéž pro starší polkit (fallback)
 │   ├── netpanel.sudoers          sudo: jen /usr/local/sbin/netpanel-ts-routes
 │   ├── netpanel-ts-routes        root helper: validace + tailscale set --advertise-routes
+│   ├── netpanel-passwd           nastavení admin PINu (sudo netpanel-passwd)
 │   ├── 99-netpanel-ipforward.conf  sysctl: IP forwarding (nutné pro subnet router)
 │   └── netpanel.default          /etc/default/netpanel (rozhraní, port)
 ├── tests/                        unit testy (Python + JS)
@@ -160,27 +175,40 @@ sudo reboot
 
 ### 2. Displej Waveshare 5inch DSI LCD
 
-Podle [Waveshare wiki](https://www.waveshare.com/wiki/5inch_DSI_LCD) pro Pi 4 na Bookworm přidej na konec
-`/boot/firmware/config.txt`:
+**Nejdřív zjisti, v jakém režimu displej běží** – rozhoduje to o tom, který kiosk půjde spustit:
 
 ```bash
-sudo nano /boot/firmware/config.txt
+ls /sys/class/drm/     # card0, card1, card1-DSI-1 ...  = KMS (OK pro výchozí kiosk)
+                       # jen "version"                 = legacy framebuffer, KMS NENÍ aktivní
+cat /proc/fb           # "vc4drmfb" = KMS,  "BCM2708 FB" = legacy firmware framebuffer
 ```
+
+Podle [Waveshare wiki](https://www.waveshare.com/wiki/5inch_DSI_LCD) má být pro Pi 4 na Bookworm v
+`/boot/firmware/config.txt` aktivní (v sekci, která platí pro Pi 4, tj. `[all]` nebo `[pi4]`):
 
 ```ini
 dtoverlay=vc4-kms-v3d
-#DSI1 Use
 dtoverlay=vc4-kms-dsi-7inch
 ```
 
-(Pokud tam `dtoverlay=vc4-kms-v3d` už je, podruhé ho nepřidávej.) Driver ani dotyk se samostatně neinstalují.
-Restartuj a ověř:
+Nedělej to ručně v `nano` – řádek přidaný „na konec souboru“ často skončí pod filtrem `[cm4]`/`[pi5]` a Pi 4 ho
+ignoruje. Použij pomocný skript (ukáže diff, udělá zálohu, umí vrátit):
 
 ```bash
-sudo reboot
+sudo ./deploy/display-kms.py            # jen ukáže, co by změnil
+sudo ./deploy/display-kms.py --apply    # zapíše (záloha config.txt.netpanel-bak) → sudo reboot
+sudo ./deploy/display-kms.py --restore  # návrat k původnímu config.txt → sudo reboot
+```
+
+Po rebootu ověř:
+
+```bash
 ls /sys/class/drm/            # má existovat něco jako card1-DSI-1
 sudo apt install -y libinput-tools && sudo libinput list-devices | grep -A3 -i touch
 ```
+
+Pokud displej s KMS nefunguje (zůstane černý), vrať config (`--restore`) a použij X11 kiosk – viz
+[Displej: KMS vs. legacy](#displej-kms-vs-legacy-černá-obrazovka-po-instalaci).
 
 Displej je nativně na šířku (800 × 480) – rotace není potřeba. Jas lze nastavit:
 `echo 200 | sudo tee /sys/class/backlight/*/brightness` (0–255).
@@ -240,9 +268,13 @@ scp -r RPI-5inchLCD-Net <uživatel>@<ip-raspberry>:~/
 
 ```bash
 cd ~/RPI-5inchLCD-Net
-chmod +x deploy/*.sh deploy/netpanel-ts-routes
+chmod +x deploy/*.sh deploy/*.py deploy/netpanel-ts-routes deploy/netpanel-passwd
 sudo ./deploy/install.sh --wifi-country CZ
 ```
+
+Na konci se instalátor zeptá na **admin PIN** (6–12 číslic, zadává se 2×, nezobrazuje se).
+Bez PINu panel ukáže jen úvodní přehled a nastavení zůstane zamčené. PIN lze kdykoli nastavit/změnit:
+`sudo netpanel-passwd`.
 
 Volby instalátoru:
 
@@ -250,8 +282,10 @@ Volby instalátoru:
 |---|---|
 | `--wifi-country CZ` | nastaví regulatorní doménu Wi-Fi přes raspi-config |
 | `--no-kiosk` | nainstaluje jen API službu (bez cage/Chromium a bez převzetí tty1) – pro testy |
+| `--kiosk-mode auto\|wayland\|x11` | `wayland` = cage (potřebuje KMS), `x11` = Xorg na legacy framebufferu, `auto` (výchozí) = wayland, když je KMS aktivní, jinak se zeptá na x11 |
 | `--no-ipforward` | nezapne IP forwarding (Tailscale subnet routing pak nebude fungovat!) |
-| `-y` | bez dotazů |
+| `--skip-pin` | neptá se na PIN (nastavíš později `sudo netpanel-passwd`) |
+| `-y` | bez dotazů (PIN se pak nenastaví) |
 
 Instalátor je idempotentní – můžeš ho spustit znovu (také pro aktualizaci).
 
@@ -266,11 +300,73 @@ Po startu se na displeji objeví NetPanel přes celou obrazovku (start trvá cca
 ### 9. Ověření
 
 ```bash
-systemctl status netpanel netpanel-kiosk
+systemctl status netpanel netpanel-kiosk netpanel-kiosk-x11
 journalctl -u netpanel -f                 # log API včetně každého spuštěného nmcli příkazu
-journalctl -u netpanel-kiosk -b           # log cage/Chromium
+journalctl -u netpanel-kiosk -b           # log cage/Chromium (X11 varianta: -u netpanel-kiosk-x11)
+sudo /opt/netpanel/deploy/diagnose.sh     # kompletní diagnostika → /tmp/netpanel-diag.txt
 curl -s http://127.0.0.1:8088/api/health  # {"ok": true, ...}
 ```
+
+## Displej: KMS vs. legacy (černá obrazovka po instalaci)
+
+**Příznak:** po instalaci a rebootu je na displeji černá obrazovka s blikajícím kurzorem (případně
+s periodickými hláškami jiných služeb, např. VNC). `systemctl status netpanel-kiosk` ukazuje opakované restarty.
+
+**Příčina (nejčastější):** displej běží na **legacy firmware framebufferu**, ne na KMS driveru.
+Poznáš to podle `ls /sys/class/drm` → jen `version` a `cat /proc/fb` → `BCM2708 FB`.
+Kiosk `cage` je Wayland kompozitor a potřebuje DRM/KMS zařízení `/dev/dri/cardN` – bez něj nemá na co kreslit
+a hned skončí. Desktop i konzole přitom „fungovaly“, protože běžely na tom starém framebufferu.
+(Instalátor do verze s tímto odstavcem na to jen varoval a pokračoval – to byla chyba.)
+
+### Postup ladění
+
+```bash
+# 0) displej hned zpět (konzole s loginem), než to vyřešíš:
+sudo systemctl disable --now netpanel-kiosk netpanel-kiosk-x11
+sudo systemctl enable --now getty@tty1
+
+# 1) diagnostika – na konci je sekce VERDICT s doporučením
+sudo ./deploy/diagnose.sh                   # z adresáře projektu, výstup i v /tmp/netpanel-diag.txt
+sudo ./deploy/diagnose.sh --kiosk-debug     # navíc 20 s běh cage s debug logem (jen KMS varianta)
+```
+
+Pak zvol jednu cestu:
+
+| | **A) Zapnout KMS** (doporučeno) | **B) X11 kiosk na legacy framebufferu** |
+|---|---|---|
+| Co se mění | `config.txt` (skriptem, se zálohou) | nic v `config.txt`; doinstaluje Xorg |
+| Příkazy | `sudo ./deploy/display-kms.py --apply` → `sudo reboot` → `ls /sys/class/drm` (musí být `cardN-DSI-1`) → `sudo ./deploy/install.sh --kiosk-mode wayland` → `sudo reboot` | `sudo ./deploy/install.sh --kiosk-mode x11` → `sudo reboot` |
+| Výhody | podporovaný grafický stack Bookwormu, GPU akcelerace, testovaná cesta NetPanelu | běží na aktuálním nastavení displeje |
+| Nevýhody / riziko | když tvoje revize displeje KMS neumí, zůstane černo → přes SSH `sudo ./deploy/display-kms.py --restore && sudo reboot` | legacy framebuffer je v Bookwormu slepá ulička (bez GPU, Chromium kreslí CPU); tuhle variantu jsem netestoval na reálném Pi |
+
+Ověření po rebootu:
+
+```bash
+systemctl status netpanel-kiosk        # A
+systemctl status netpanel-kiosk-x11    # B
+journalctl -b -u netpanel-kiosk-x11    # B: hledej chyby Xorg / Chromium
+cat /var/log/Xorg.0.log | grep -E '\(EE\)|fbdev'   # B: Xorg log (s xserver-xorg-legacy běží Xorg jako root)
+```
+
+Časté chyby varianty B a řešení:
+
+| Hláška v logu | Řešení |
+|---|---|
+| `Only console users are allowed to run the X server` | `/etc/X11/Xwrapper.config` musí mít `allowed_users=console` a `needs_root_rights=yes` (instalátor to nastaví). |
+| `Cannot open /dev/fb0` / `no screens found` | `ls -l /dev/fb0`; uživatel `netpanel` musí být ve skupině `video` (`id netpanel`). Konfigurace `/etc/X11/xorg.conf.d/99-netpanel-fbdev.conf` musí existovat. |
+| Chromium okno je menší než displej | V `/etc/default/netpanel` nastav `NETPANEL_WINDOW_SIZE=800,480` a restartuj kiosk. |
+| Dotyk nereaguje / je posunutý | `sudo apt install xinput` a `DISPLAY=:0 xinput list` (jako netpanel); v legacy režimu dotyk obsluhuje firmware ovladač `rpi-ft5406`. |
+
+### VNC a kiosk
+
+Kiosk **nahrazuje desktop** na displeji (`systemctl set-default multi-user.target`). VNC server, který sdílel
+desktop (RealVNC `vncserver-x11-serviced` nebo `wayvnc`), pak nemá co sdílet a periodicky hlásí chyby –
+ty prosvítají na konzoli, dokud kiosk neběží. Možnosti:
+
+- VNC nepotřebuješ → `sudo systemctl disable --now vncserver-x11-serviced` (nebo `wayvnc`, viz `systemctl list-units '*vnc*'`).
+- Potřebuješ vzdálený desktop → kiosk a desktop na jednom displeji současně nejdou. Buď kiosk vypni
+  (`disable` + `sudo systemctl set-default graphical.target`), nebo použij RealVNC ve virtuálním režimu
+  (samostatná virtuální plocha) – to NetPanel nenastavuje.
 
 ## Co přesně dělá instalátor
 
@@ -280,12 +376,14 @@ curl -s http://127.0.0.1:8088/api/health  # {"ok": true, ...}
 | Uživatel | `netpanel` (domov `/var/lib/netpanel`, bez hesla, shell `nologin`), skupiny `video render input netdev` |
 | Aplikace | `/opt/netpanel` (vlastník root, uživatel netpanel jen čte) |
 | Tailscale helper | `/usr/local/sbin/netpanel-ts-routes` (root, 0755) |
+| Admin PIN | `/usr/local/sbin/netpanel-passwd`; hash PINu v `/etc/netpanel/auth.json` (root:netpanel, 0640) |
 | sudo | `/etc/sudoers.d/netpanel` – **jediný** povolený příkaz: helper výše (ověřeno `visudo -c`) |
 | polkit | `/etc/polkit-1/rules.d/50-netpanel.rules` – netpanel smí akce `org.freedesktop.NetworkManager.*` |
 | PAM | `/etc/pam.d/netpanel` – session pro kiosk (logind přidělí displej + dotyk) |
 | sysctl | `/etc/sysctl.d/99-netpanel-ipforward.conf` – `net.ipv4.ip_forward=1`, `net.ipv6.conf.all.forwarding=1` |
 | Konfigurace | `/etc/default/netpanel` (při upgradu se nepřepisuje) |
-| systemd | `netpanel.service` (enable + start), `netpanel-kiosk.service` (enable, startuje po rebootu) |
+| systemd | `netpanel.service` (enable + start); `netpanel-kiosk.service` (cage) **nebo** `netpanel-kiosk-x11.service` (Xorg) podle `--kiosk-mode` – enable, startuje po rebootu |
+| X11 režim | `xserver-xorg-*`, `xinit`; `/etc/X11/Xwrapper.config` (`needs_root_rights=yes`, záloha `.netpanel-bak`); bez KMS `/etc/X11/xorg.conf.d/99-netpanel-fbdev.conf` |
 | Boot | `systemctl set-default multi-user.target` (vypne desktop, pokud byl), `systemctl disable getty@tty1` |
 
 ## Kiosk: služba po bootu, fullscreen, nejde zavřít
@@ -306,6 +404,7 @@ běžné zkratky prohlížeče blokované stránkou; 100% to ale není – viz o
 ### Jak se dostat „ven“ (údržba přes SSH)
 
 ```bash
+# (X11 varianta: všude místo netpanel-kiosk použij netpanel-kiosk-x11)
 sudo systemctl stop netpanel-kiosk        # dočasně zastaví kiosk
 sudo systemctl start getty@tty1           # přihlašovací prompt na displeji
 sudo systemctl start netpanel-kiosk       # zpět do kiosku
@@ -351,18 +450,49 @@ Spuštěné příkazy (pro kontrolu v `journalctl -u netpanel`), např.:
 
 ```text
 nmcli connection modify netpanel-eth connection.interface-name eth0 ... ipv4.method manual ipv4.addresses 192.168.10.50/24 ipv4.gateway 192.168.10.1 ipv4.dns "1.1.1.1 8.8.8.8"
-nmcli --wait 40 connection up netpanel-eth
-nmcli connection add type wifi ifname wlan0 con-name netpanel-ap ssid NetPanel-AP 802-11-wireless.mode ap ipv4.method shared ... 802-11-wireless-security.psk ******
+nmcli --wait 60 connection up netpanel-eth
+nmcli connection add type wifi ifname wlan0 con-name netpanel-ap-new ssid NetPanel-AP ... 802-11-wireless.mode ap ipv4.method shared ... 802-11-wireless-security.psk ******
 sudo -n /usr/local/sbin/netpanel-ts-routes 192.168.10.0/24   →   tailscale set --advertise-routes=192.168.10.0/24
 ```
 
 Hesla se v logu maskují (`******`).
+
+## Přihlášení: admin PIN a automatické odhlášení
+
+| Stav | Co jde |
+|---|---|
+| **Nepřihlášeno** | Úvodní obrazovka (stav Ethernet, Wi-Fi, Tailscale, teplota, čas). Dlaždice mají ikonu zámku. |
+| **Přihlášeno** | Všechny obrazovky a změny nastavení. V horní liště je zelené tlačítko **Logout** s odpočtem do automatického odhlášení. |
+
+- **Přihlášení:** klepnutí na dlaždici Ethernet/Wi-Fi, na *Advertise subnet* nebo na **Login** v horní liště otevře
+  PIN klávesnici. Po přihlášení se rovnou otevře obrazovka, na kterou jsi klepl.
+- **Logout:** tlačítko v horní liště úvodní obrazovky. Zavře všechny dialogy i rozepsané klávesnice a vrátí se na přehled.
+- **Automatické odhlášení:** po **5 minutách bez dotyku** displeje. 30 s předem se dole objeví varování s odpočtem;
+  stačí se dotknout displeje. Rozepsaná (neuložená) změna se při odhlášení zahodí.
+- **Špatný PIN:** po 5 chybách je přihlášení zamčené na 60 s, každé další kolo 5 chyb zámek zdvojnásobí
+  (max. 15 min). Počítadlo přežije restart služby. Ruční odemčení: `sudo netpanel-passwd --unlock` + restart služby.
+- **Session** je jen v paměti: restart služby, restart Chromia nebo změna PINu = všichni odhlášeni.
+- Server má vlastní pojistku: session bez aktivity vyprší po 5 min + 45 s, i kdyby UI selhalo.
+
+Správa PINu (jen přes SSH, z displeje PIN změnit nejde – záměrně):
+
+```bash
+sudo netpanel-passwd            # nastavit / změnit PIN (6–12 číslic; 111111, 123456 apod. odmítne)
+sudo netpanel-passwd --status   # je PIN nastavený?
+sudo netpanel-passwd --unlock   # zrušit zámek po špatných pokusech (pak: sudo systemctl restart netpanel)
+sudo netpanel-passwd --remove   # smazat PIN → nastavení zamčené pro všechny
+```
+
+PIN se ukládá jako PBKDF2-SHA256 hash se solí (150 000 iterací) v `/etc/netpanel/auth.json`,
+čitelný jen pro root a službu. Zapomenutý PIN se neobnovuje – jen nastaví nový.
 
 ## Bezpečnost a oprávnění
 
 - **API poslouchá jen na `127.0.0.1:8088`** – ze sítě není dostupné. Kontroluje hlavičku `Host` (ochrana proti
   DNS rebinding), POST vyžaduje hlavičku `X-NetPanel: 1` + JSON (cizí web ji nemůže poslat bez CORS, který se
   nepovoluje), stránka má striktní Content-Security-Policy.
+- **Admin PIN** – bez platné session server odmítne všechno kromě přehledu a loginu (HTTP 401). Token je náhodný
+  (256 bit), drží se jen v paměti prohlížeče a posílá v hlavičce `X-NetPanel-Token`.
 - **Žádný kód neběží jako root** kromě malého helperu `netpanel-ts-routes`, který znovu validuje vstup
   (kanonická síť, žádné `/0`, loopback, multicast, link-local ani `100.64.0.0/10`) a teprve pak volá `tailscale set`.
   sudoers povoluje uživateli `netpanel` **jen tento helper**, ne celý `tailscale`.
@@ -371,14 +501,16 @@ Hesla se v logu maskují (`******`).
 
 Rizika, o kterých máš vědět:
 
-- **Kdo má fyzický přístup k displeji, může měnit síť** – to je účel zařízení. Panel nemá PIN.
+- **PIN je jen tak silný, jak dlouhý je.** 6 číslic + zámek po 5 pokusech je proti náhodnému kolemjdoucímu
+  dostatečné; proti někomu s fyzickým přístupem a časem ne (může vytáhnout SD kartu). Pro citlivé sítě používej
+  delší PIN a zařízení fyzicky zabezpeč.
+- Přehled na úvodní obrazovce (IP adresy, SSID, Tailscale IP) je vidět **bez přihlášení** – tak to bylo zadáno.
 - Heslo Wi-Fi se při volání `nmcli` předává jako argument a je na okamžik vidět v `ps` lokálním uživatelům.
   Na jednoúčelovém zařízení bez dalších uživatelů je to přijatelné, v logu je maskované.
 - Heslo AP je v GUI vidět v čitelné podobě (aby ho šlo nadiktovat) – skryješ ho ikonou oka.
 - Polkit pravidlo dává uživateli `netpanel` plnou správu NetworkManageru. Kompromitace tohoto účtu = změna sítě.
-- API na `127.0.0.1` nemá přihlášení: **jakýkoli lokální proces/uživatel na Pi** ho může volat a měnit síť
-  i Tailscale routy. Proti webovým stránkám a síti je chráněné, proti lokálním uživatelům ne – na Pi proto
-  nedávej účty lidem, kteří nemají mít správu sítě.
+- Lokální uživatel na Pi se SSH přístupem PIN nepotřebuje – má `nmcli`/`sudo` přímo. PIN chrání dotykový panel,
+  ne systém. Na Pi proto nedávej účty lidem, kteří nemají mít správu sítě.
 
 ## Konfigurace
 
@@ -388,6 +520,9 @@ Rizika, o kterých máš vědět:
 NETPANEL_ETH=eth0        # název ethernet rozhraní
 NETPANEL_WLAN=wlan0      # název Wi-Fi rozhraní
 NETPANEL_PORT=8088       # port API (jen localhost)
+NETPANEL_IDLE_TIMEOUT=300  # automatické odhlášení po N sekundách nečinnosti
+#WLR_DRM_DEVICES=/dev/dri/card1   # cage: vynutit DRM zařízení s DSI výstupem
+#NETPANEL_WINDOW_SIZE=800,480     # X11 kiosk: velikost okna Chromia
 #NETPANEL_LOG=DEBUG      # podrobnější log
 ```
 
@@ -409,8 +544,9 @@ python3 -m netpanel --demo
 # otevři http://127.0.0.1:8088 a nastav okno prohlížeče na 800 × 480 (DevTools → device toolbar)
 ```
 
-V demu lze vyzkoušet i chybové stavy: heslo `wrongpass` při připojení k Wi-Fi simuluje špatné heslo
-(dialog + návrat k předchozímu spojení).
+V demu je admin PIN **`123456`** (login to i napíše). Chybové stavy: heslo `wrongpass` při připojení k Wi-Fi
+simuluje špatné heslo (dialog + návrat k předchozímu spojení). Rychlejší test auto-logoutu:
+`python3 -m netpanel --demo --idle-timeout 40`.
 
 Testy:
 
@@ -424,7 +560,9 @@ python3 tools/screenshots.py                    # průchod UI + screenshoty (vy�
 
 | Příznak | Příčina / řešení |
 |---|---|
-| Displej černý, na SSH `systemctl status netpanel-kiosk` ukazuje restartování | `journalctl -u netpanel-kiosk -b`. Častá příčina: displej nedetekovaný (`ls /sys/class/drm` bez `DSI`) → zkontroluj `config.txt` a kabel. Nebo běží desktop: `systemctl get-default` musí být `multi-user.target`. |
+| Černá obrazovka s kurzorem, kiosk se restartuje | `ls /sys/class/drm` ukazuje jen `version` → KMS není aktivní, cage nemůže běžet. Viz [Displej: KMS vs. legacy](#displej-kms-vs-legacy-černá-obrazovka-po-instalaci). Diagnostika: `sudo ./deploy/diagnose.sh`. |
+| Displej černý, KMS aktivní | `journalctl -u netpanel-kiosk -b`, `sudo ./deploy/diagnose.sh --kiosk-debug`. Nebo běží desktop: `systemctl get-default` musí být `multi-user.target`. |
+| Na konzoli periodicky chyby VNC | VNC server nemá desktop – viz [VNC a kiosk](#vnc-a-kiosk). |
 | cage: „Unable to open seat“ / „Could not take control of session“ | PAM session nevznikla: existuje `/etc/pam.d/netpanel`? Nekoliduje getty na tty1 (`systemctl status getty@tty1`)? |
 | Chromium: „Chromium not found“ | `sudo apt install chromium-browser` (případně `chromium`). |
 | Na displeji „NetPanel service is not responding“ | `systemctl status netpanel`, `journalctl -u netpanel -e`. |
@@ -440,19 +578,24 @@ python3 tools/screenshots.py                    # průchod UI + screenshoty (vy�
 | „Permission denied for 'tailscale set'“ | Chybí `/etc/sudoers.d/netpanel` nebo helper → spusť znovu `deploy/install.sh`. Test: `sudo -u netpanel sudo -n /usr/local/sbin/netpanel-ts-routes --clear`. |
 | Routa je pořád PENDING | Schval ji v Tailscale admin konzoli (nebo `autoApprovers`). |
 | Tailscale „Needs login“ | `sudo tailscale up` přes SSH. |
-| `install.sh`: „/bin/bash^M: bad interpreter“ | Soubory byly uloženy s Windows konci řádků (CRLF). Oprava na Pi: `sed -i 's/\r$//' deploy/*.sh deploy/netpanel-ts-routes deploy/*.service deploy/netpanel.*` |
+| Login: „No PIN is set yet“ | PIN není nastavený: `sudo netpanel-passwd`. |
+| Login: „Too many wrong PINs“ | Počkej (max. 15 min) nebo `sudo netpanel-passwd --unlock && sudo systemctl restart netpanel`. |
+| Zapomenutý PIN | Přes SSH nastav nový: `sudo netpanel-passwd`. |
+| Odhlašuje to během práce | Auto-logout po 5 min bez dotyku; delší čas: `NETPANEL_IDLE_TIMEOUT` v `/etc/default/netpanel`. |
+| `install.sh`: „/bin/bash^M: bad interpreter“ | Soubory byly uloženy s Windows konci řádků (CRLF). Oprava na Pi: `sed -i 's/\r$//' deploy/*.sh deploy/*.py deploy/netpanel-ts-routes deploy/netpanel-passwd deploy/*.service deploy/*.conf deploy/netpanel.*` |
 | Po změně IP na eth0 jsem ztratil SSH | Očekávané – SSH běželo přes starou adresu. Připoj se na novou IP (je vidět na displeji). |
 
 ## Známá omezení a kritické poznámky
 
 Tohle je poctivý seznam slabin – rozhodni, co z toho je pro tvoje nasazení problém:
 
-1. **Neotestováno na reálném HW.** Testováno: unit testy (43), parsování výstupu `nmcli`, generované příkazy,
-   rollback, HTTP API a celé UI v Chromiu 800 × 480 s demo backendem; kód prošel nezávislou revizí.
+1. **Neotestováno na reálném HW.** Testováno: unit testy (56), parsování výstupu `nmcli`, generované příkazy,
+   rollback, HTTP API včetně přihlášení, celé UI v Chromiu 800 × 480 s demo backendem (login, špatný PIN,
+   varování a auto-logout, odhlášení se zavřením otevřené klávesnice); backend prošel nezávislou revizí.
    Výstup `nmcli` se čte s `--escape no` – formát se mezi verzemi NetworkManageru může mírně lišit. Neověřeno: chování na Pi 4 s tímto
    displejem, konkrétní verze `nmcli`/`cage`/`chromium` v tvém image. **První nasazení dělej s SSH po ruce.**
-2. **Konfigurace přes dotyk = konfigurace pro kohokoli u displeje.** Pokud zařízení visí ve veřejném prostoru,
-   přidej PIN/zámek (dnes není).
+2. **Jeden společný admin PIN, žádné uživatelské účty ani audit „kdo co změnil“.** Log v `journalctl -u netpanel`
+   říká *co* a *kdy*, ne *kdo*. Pokud potřebuješ dohledatelnost, je to další krok (osobní PINy).
 3. **Jedna Wi-Fi karta = buď AP, nebo klient.** Současný provoz AP + station na jednom rádiu NetPanel nepodporuje.
    Pro uplink přes Wi-Fi a zároveň AP je potřeba druhý (USB) adaptér.
 4. **Uplink pro AP je eth0.** Když eth0 nemá internet, klienti AP ho mít nebudou.
@@ -487,7 +630,7 @@ Odinstalace:
 
 ```bash
 sudo ./deploy/uninstall.sh            # služby, sudo, polkit, PAM pryč; /opt/netpanel a uživatel zůstanou
-sudo ./deploy/uninstall.sh --purge    # odstraní i /opt/netpanel, /etc/default/netpanel, sysctl soubor a uživatele
+sudo ./deploy/uninstall.sh --purge    # odstraní i /opt/netpanel, /etc/netpanel (PIN), /etc/default/netpanel, sysctl soubor a uživatele
 ```
 
 NetworkManager profily `netpanel-eth`, `netpanel-ap`, `netpanel-sta` zůstávají (jsou to tvoje síťová nastavení).

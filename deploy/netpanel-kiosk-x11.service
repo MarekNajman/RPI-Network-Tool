@@ -1,0 +1,40 @@
+# NetPanel kiosk - X11 variant: Xorg + Chromium on tty1, no window manager.
+# For systems WITHOUT the KMS display driver (legacy firmware framebuffer,
+# /sys/class/drm has no cardN), where cage/Wayland cannot run.
+# Fullscreen, no panels, VT switching disabled (-novtswitch), no cursor.
+# Installed by: sudo ./deploy/install.sh --kiosk-mode x11
+
+[Unit]
+Description=NetPanel kiosk (Xorg + Chromium, legacy framebuffer) on tty1
+Wants=netpanel.service dbus.socket systemd-logind.service
+After=netpanel.service dbus.socket systemd-logind.service
+After=systemd-user-sessions.service plymouth-quit-wait.service
+Conflicts=getty@tty1.service netpanel-kiosk.service display-manager.service
+After=getty@tty1.service
+ConditionPathExists=/dev/tty1
+
+[Service]
+Type=simple
+User=netpanel
+PAMName=netpanel
+WorkingDirectory=/var/lib/netpanel
+EnvironmentFile=-/etc/default/netpanel
+# Xorg is started through the Debian wrapper (xserver-xorg-legacy); it needs
+# stdin on a virtual console, which TTYPath/StandardInput provide.
+ExecStart=/usr/bin/xinit /opt/netpanel/deploy/kiosk-x11.sh -- /usr/bin/X :0 vt1 -keeptty -nolisten tcp -nocursor -novtswitch -s 0 -dpms
+ExecStartPost=-+/usr/bin/chvt 1
+Restart=always
+RestartSec=3
+
+UtmpIdentifier=tty1
+UtmpMode=user
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+StandardInput=tty-fail
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

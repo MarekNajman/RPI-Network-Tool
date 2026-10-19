@@ -1,0 +1,7 @@
+#!/bin/sh
+# Set / change the NetPanel admin PIN. Installed to /usr/local/sbin/netpanel-passwd.
+#   sudo netpanel-passwd            set a new PIN (asked twice, hidden)
+#   sudo netpanel-passwd --status   is a PIN set?
+#   sudo netpanel-passwd --unlock   clear the wrong-PIN lock
+#   sudo netpanel-passwd --remove   delete the PIN (panel settings stay locked)
+exec /usr/bin/python3 -I -c 'import sys; sys.path.insert(0, "/opt/netpanel"); from netpanel.passwd import main; sys.exit(main(sys.argv[1:]))' "$@"
