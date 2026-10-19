@@ -1,0 +1,12 @@
+// NetPanel: let the "netpanel" service user manage NetworkManager
+// (create/modify/activate connections, scan Wi-Fi, toggle radio) without a password.
+// Installed to /etc/polkit-1/rules.d/10-netpanel.rules by deploy/install.sh.
+// The low number matters: polkit evaluates rules from /etc and /usr/share in
+// file-name order and the first rule that returns a result wins - "10-" runs
+// before distribution rules (49-/50-/60-...) that could answer "no" or "auth".
+polkit.addRule(function (action, subject) {
+    if (subject.user === "netpanel" &&
+        action.id.indexOf("org.freedesktop.NetworkManager.") === 0) {
+        return polkit.Result.YES;
+    }
+});

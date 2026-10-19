@@ -173,12 +173,14 @@ install -d -m 0750 -o root -g "$APP_USER" "$AUTH_DIR"
 
 log "Installing polkit rule for NetworkManager"
 install -d -m 0755 /etc/polkit-1/rules.d
-install -m 0644 "$SRC_DIR/deploy/50-netpanel.rules" /etc/polkit-1/rules.d/50-netpanel.rules
-if [ -d /etc/polkit-1/localauthority ]; then
-    install -d /etc/polkit-1/localauthority/50-local.d
-    install -m 0644 "$SRC_DIR/deploy/50-netpanel.pkla" /etc/polkit-1/localauthority/50-local.d/50-netpanel.pkla
-fi
-systemctl try-restart polkit.service 2>/dev/null || true
+install -m 0644 "$SRC_DIR/deploy/10-netpanel.rules" /etc/polkit-1/rules.d/10-netpanel.rules
+rm -f /etc/polkit-1/rules.d/50-netpanel.rules   # older NetPanel versions
+# legacy .pkla format too (used when polkitd-pkla / an old polkit decides)
+install -d /etc/polkit-1/localauthority/50-local.d
+install -m 0644 "$SRC_DIR/deploy/50-netpanel.pkla" /etc/polkit-1/localauthority/50-local.d/50-netpanel.pkla
+systemctl enable polkit.service >/dev/null 2>&1 || true
+systemctl restart polkit.service 2>/dev/null || warn "polkit.service could not be restarted"
+
 
 install -m 0644 "$SRC_DIR/deploy/netpanel.pam" /etc/pam.d/netpanel
 [ -f /etc/default/netpanel ] || install -m 0644 "$SRC_DIR/deploy/netpanel.default" /etc/default/netpanel
@@ -260,6 +262,12 @@ if systemctl is-active --quiet netpanel.service; then
     log "netpanel.service is running (http://127.0.0.1:8088, local only)"
 else
     warn "netpanel.service failed - check: journalctl -u netpanel -e"
+fi
+
+log "Checking privileges of user '$APP_USER'"
+if ! bash "$APP_DIR/deploy/check-permissions.sh"; then
+    warn "Some privilege checks failed - the panel would show 'Insufficient privileges'."
+    warn "Try: sudo $APP_DIR/deploy/check-permissions.sh --fix   (details in README, section Oprávnění)"
 fi
 
 echo

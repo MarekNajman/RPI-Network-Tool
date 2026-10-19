@@ -40,7 +40,14 @@ class NetworkBackend:
     # ------------------------------------------------------------------ helpers
 
     def _nm(self, *args: str, timeout: float = 20, secrets=(), check=True, quiet=False) -> str:
-        return run(["nmcli", *args], timeout=timeout, secrets=secrets, check=check, quiet=quiet).stdout
+        try:
+            return run(["nmcli", *args], timeout=timeout, secrets=secrets, check=check, quiet=quiet).stdout
+        except CommandError as e:
+            low = e.message.lower()
+            if "insufficient privileges" in low or "not authorized" in low:
+                e.message = ("%s - NetworkManager refused the change for the 'netpanel' user (polkit). "
+                             "Over SSH run: sudo /opt/netpanel/deploy/check-permissions.sh --fix" % e.message.rstrip("."))
+            raise
 
     def _device_show(self, iface: str) -> Optional[Dict[str, str]]:
         try:

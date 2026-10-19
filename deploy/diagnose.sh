@@ -55,6 +55,9 @@ sec "TOUCH / INPUT"
 run "grep -E '^N: Name|^H: Handlers' /proc/bus/input/devices"
 run "id netpanel 2>&1"
 
+sec "PRIVILEGES (polkit / sudo) - same checks as deploy/check-permissions.sh"
+LINES_MAX=60 run "bash '$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/check-permissions.sh'"
+
 sec "BOOT TARGET / DESKTOP / VNC"
 run "systemctl get-default"
 run "systemctl is-enabled display-manager.service lightdm.service getty@tty1.service 2>&1"
