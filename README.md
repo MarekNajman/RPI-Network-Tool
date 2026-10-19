@@ -43,6 +43,7 @@ Všechny obrazovky jsou v [`docs/screenshots/`](docs/screenshots/) (vygenerovan�
 3. [Požadavky](#požadavky)
 4. [Instalace krok za krokem](#instalace-krok-za-krokem)
    - [Displej: KMS vs. legacy (černá obrazovka po instalaci)](#displej-kms-vs-legacy-černá-obrazovka-po-instalaci)
+   - [Dotyk nefunguje](#dotyk-nefunguje)
    - [Oprávnění: „Insufficient privileges“](#oprávnění-insufficient-privileges)
 5. [Co přesně dělá instalátor](#co-přesně-dělá-instalátor)
 6. [Kiosk: služba po bootu, fullscreen, nejde zavřít](#kiosk-služba-po-bootu-fullscreen-nejde-zavřít)
@@ -124,6 +125,7 @@ RPI-5inchLCD-Net/
 │   ├── netpanel.pam              PAM session pro kiosk (přístup k displeji a dotyku)
 │   ├── 10-netpanel.rules         polkit: uživatel netpanel smí ovládat NetworkManager
 │   ├── check-permissions.sh      kontrola/oprava oprávnění („Insufficient privileges“)
+│   ├── check-touch.sh            diagnostika dotyku (overlaye, ovladač, události, kiosk)
 │   ├── 50-netpanel.pkla          totéž pro starší polkit (fallback)
 │   ├── netpanel.sudoers          sudo: jen /usr/local/sbin/netpanel-ts-routes
 │   ├── netpanel-ts-routes        root helper: validace + tailscale set --advertise-routes
@@ -369,6 +371,64 @@ ty prosvítají na konzoli, dokud kiosk neběží. Možnosti:
 - Potřebuješ vzdálený desktop → kiosk a desktop na jednom displeji současně nejdou. Buď kiosk vypni
   (`disable` + `sudo systemctl set-default graphical.target`), nebo použij RealVNC ve virtuálním režimu
   (samostatná virtuální plocha) – to NetPanel nenastavuje.
+
+## Dotyk nefunguje
+
+**Jak dotyk funguje v každém režimu displeje** – proto se může po přepnutí na KMS rozbít:
+
+| Režim | Kdo čte dotykový řadič (I2C adresa 0x38) |
+|---|---|
+| legacy (bez KMS) | **firmware** GPU, do Linuxu ho předává ovladač `rpi-ft5406` |
+| KMS (`vc4-kms-dsi-7inch`) | **kernel** ovladač `edt-ft5x06`, který zapíná sám overlay `vc4-kms-dsi-7inch` |
+
+Když v `config.txt` zůstane i starý `dtoverlay=rpi-ft5406`, sahají na stejný řadič dva ovladače – typicky
+pak dotyk nefunguje vůbec nebo jen občas (třeba po prvním startu ano, po dalším rebootu ne).
+
+### Krok 1 – diagnostika (nic nemění)
+
+```bash
+cd ~/RPI-5inchLCD-Net
+sudo ./deploy/check-touch.sh --test      # během 15 s se dotýkej displeje
+```
+
+Skript projde vrstvy odspodu: řádky v `config.txt` (se sekcí, ve které jsou) → načtené ovladače →
+log jádra (aktuální **i předchozí** boot – pokud je journal persistentní, uvidíš rozdíl mezi startem, kdy
+dotyk šel, a startem, kdy nejde) → vstupní zařízení → živý test událostí → kiosk session. Na konci je **VERDICT**.
+
+> Pokud dotyk pod KMS **už jednou fungoval** a bez změny `config.txt` přestal, je nejpravděpodobnější
+> řadič, který se při tomto startu nerozjel (teplý reboot ho neresetuje) – zkus nejdřív studený start
+> (`sudo poweroff`, napájení pryč na 10 s). Pokud se to opakuje, je to známka konfliktu ovladačů (bod a).
+
+### Krok 2 – oprava podle výsledku
+
+**a) WARN `rpi-ft5406` / `disable_touchscreen=1` / overlay jiného displeje (pitft, stmpe, ads7846 …)**
+
+```bash
+sudo cp /boot/firmware/config.txt /boot/firmware/config.txt.touch-bak     # záloha
+sudo nano /boot/firmware/config.txt
+#   před problémové řádky dej '#', např.:
+#   #dtoverlay=rpi-ft5406
+#   #dtoverlay=pitft28-resistive,...
+#   (vc4-kms-v3d a vc4-kms-dsi-7inch NECH)
+sudo poweroff        # pak vytáhni napájení na 10 s a zapni - studený start, ne jen reboot
+```
+
+Návrat: `sudo cp /boot/firmware/config.txt.touch-bak /boot/firmware/config.txt && sudo reboot`.
+
+**b) „no touchscreen input device“ bez WARN** – jádro řadič nevidí: zkontroluj plochý kabel na obou
+koncích (kontakty správnou stranou), udělej studený start (napájení pryč na 10 s). Pak znovu `--test`.
+
+**c) zařízení existuje, ale „no events“** – řadič visí nebo ho blokuje jiný ovladač → bod a) + studený start.
+
+**d) události chodí („delivers events“), ale panel nereaguje** – problém je v kiosku, ne v hardwaru:
+
+```bash
+sudo systemctl restart netpanel-kiosk
+sudo ./deploy/diagnose.sh --kiosk-debug     # v logu cage hledej input / touch zařízení
+```
+
+Pošli mi výstup `sudo ./deploy/check-touch.sh --test` a aktivní řádky `config.txt`
+(`grep -nvE '^[[:space:]]*(#|$)' /boot/firmware/config.txt`) – vlož je jako text do chatu.
 
 ## Oprávnění: „Insufficient privileges“
 
@@ -629,7 +689,8 @@ python3 tools/screenshots.py                    # průchod UI + screenshoty (vy�
 | cage: „Unable to open seat“ / „Could not take control of session“ | PAM session nevznikla: existuje `/etc/pam.d/netpanel`? Nekoliduje getty na tty1 (`systemctl status getty@tty1`)? |
 | Chromium: „Chromium not found“ | `sudo apt install chromium-browser` (případně `chromium`). |
 | Na displeji „NetPanel service is not responding“ | `systemctl status netpanel`, `journalctl -u netpanel -e`. |
-| Dotyk nereaguje | `sudo libinput list-devices` – musí tam být touchscreen; zkontroluj kabel a `disable_touchscreen` v `config.txt`. |
+| Dotyk nereaguje | `sudo ./deploy/check-touch.sh --test` – viz [Dotyk nefunguje](#dotyk-nefunguje). |
+| Při bootu `stmpe-spi spi0.1: unknown chip id: 0x0 ... failed with error -22` | V `config.txt` je overlay pro jiný (SPI) displej s odporovým dotykem (Adafruit PiTFT apod.), který není připojený. Samo o sobě neškodí, ale nepatří tam – smaž ho. Viz [Dotyk nefunguje](#dotyk-nefunguje). |
 | cage startuje, ale displej zůstane černý | Pi 4 má dvě DRM zařízení (v3d a vc4). Pokud cage vybere špatné, přidej do `/etc/default/netpanel` řádek `WLR_DRM_DEVICES=/dev/dri/card1` (číslo karty s `DSI` v `ls /sys/class/drm`) a restartuj kiosk. |
 | Hlášky „Not authorized“ / „Insufficient privileges“ při ukládání sítě | Viz [Oprávnění: „Insufficient privileges“](#oprávnění-insufficient-privileges). Rychle: `sudo /opt/netpanel/deploy/check-permissions.sh --fix`. |
 | Wi-Fi „Blocked (rfkill)“ | Nenastavená země: `sudo raspi-config nonint do_wifi_country CZ`, `rfkill list`, reboot. |
