@@ -1,0 +1,67 @@
+#!/usr/bin/python3 -I
+"""NetPanel root helper - the ONLY command the `netpanel` user may run via sudo.
+
+    netpanel-ts-routes <cidr>[,<cidr>...]     e.g. 192.168.1.0/24
+    netpanel-ts-routes --clear
+
+Every route is validated strictly (canonical network address, no /0, no
+loopback / multicast / link-local, nothing inside Tailscale's 100.64.0.0/10)
+and only then is this executed as root:
+
+    tailscale set --advertise-routes=<routes>
+
+Installed to /usr/local/sbin/netpanel-ts-routes (root:root 0755) and allowed
+by /etc/sudoers.d/netpanel.
+"""
+
+import ipaddress
+import os
+import shutil
+import sys
+
+CGNAT = ipaddress.ip_network("100.64.0.0/10")
+
+
+def die(msg, code=2):
+    print("netpanel-ts-routes: " + msg, file=sys.stderr)
+    sys.exit(code)
+
+
+def parse(arg):
+    if arg == "--clear":
+        return []
+    if len(arg) > 512:
+        die("argument too long")
+    routes = []
+    for part in arg.split(","):
+        try:
+            net = ipaddress.ip_network(part, strict=True)
+        except ValueError as e:
+            die("invalid route %r: %s" % (part, e))
+        if str(net) != part:
+            die("route must be written canonically: %s" % net)
+        if net.prefixlen == 0:
+            die("/0 is not allowed (use an exit node instead)")
+        if net.is_loopback or net.is_multicast or net.is_link_local or net.is_unspecified:
+            die("route %s is not allowed" % net)
+        if net.version == 4 and net.overlaps(CGNAT):
+            die("route %s overlaps 100.64.0.0/10 (Tailscale)" % net)
+        if str(net) not in routes:
+            routes.append(str(net))
+    return routes
+
+
+def main(argv):
+    if len(argv) != 2:
+        die("usage: netpanel-ts-routes <cidr>[,<cidr>...] | --clear")
+    routes = parse(argv[1])
+    ts = shutil.which("tailscale", path="/usr/bin:/usr/sbin:/bin:/sbin")
+    if not ts:
+        die("tailscale binary not found", 127)
+    cmd = [ts, "set", "--advertise-routes=" + ",".join(routes)]
+    print("+ " + " ".join(cmd), flush=True)
+    os.execv(ts, cmd)
+
+
+if __name__ == "__main__":
+    main(sys.argv)

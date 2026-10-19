@@ -1,0 +1,8 @@
+; Fallback for systems that use the legacy polkit "local authority" (polkitd-pkla).
+; Installed to /etc/polkit-1/localauthority/50-local.d/50-netpanel.pkla when that directory exists.
+[NetPanel NetworkManager]
+Identity=unix-user:netpanel
+Action=org.freedesktop.NetworkManager.*
+ResultAny=yes
+ResultInactive=yes
+ResultActive=yes

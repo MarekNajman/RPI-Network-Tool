@@ -1,0 +1,41 @@
+# NetPanel kiosk: cage (single-window Wayland compositor) + Chromium on tty1.
+# Fullscreen, no panels, no window decorations, no VT switching -> the UI
+# cannot be closed or minimised from the touch screen.
+# Installed to /etc/systemd/system/netpanel-kiosk.service by deploy/install.sh
+# Based on https://github.com/cage-kiosk/cage/wiki/Starting-Cage-on-boot-with-systemd
+
+[Unit]
+Description=NetPanel kiosk (cage + Chromium) on tty1
+Wants=netpanel.service dbus.socket systemd-logind.service
+After=netpanel.service dbus.socket systemd-logind.service
+After=systemd-user-sessions.service plymouth-quit-wait.service
+# Takes over tty1 instead of the login prompt.
+Conflicts=getty@tty1.service
+After=getty@tty1.service
+ConditionPathExists=/dev/tty1
+
+[Service]
+Type=simple
+User=netpanel
+# PAM session -> logind grants the user access to the display (DRM) and touch input.
+PAMName=netpanel
+WorkingDirectory=/var/lib/netpanel
+EnvironmentFile=-/etc/default/netpanel
+# -d: ask clients not to draw window decorations. VT switching stays disabled (no -s).
+ExecStart=/usr/bin/cage -d -- /opt/netpanel/deploy/kiosk.sh
+ExecStartPost=-+/usr/bin/chvt 1
+Restart=always
+RestartSec=3
+
+UtmpIdentifier=tty1
+UtmpMode=user
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+StandardInput=tty-fail
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,9 @@
+#%PAM-1.0
+# PAM stack for the NetPanel kiosk session (netpanel-kiosk.service, PAMName=netpanel).
+# pam_systemd registers a logind session on seat0/tty1, which gives the
+# unprivileged "netpanel" user access to the display and the touch screen.
+# Installed to /etc/pam.d/netpanel by deploy/install.sh
+auth     required  pam_unix.so nullok
+account  required  pam_unix.so
+session  required  pam_unix.so
+session  required  pam_systemd.so

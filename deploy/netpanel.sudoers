@@ -1,0 +1,4 @@
+# NetPanel: the service user may change the Tailscale advertised routes - nothing else.
+# The helper validates its argument and then runs: tailscale set --advertise-routes=<routes>
+# Installed to /etc/sudoers.d/netpanel (0440) by deploy/install.sh
+netpanel ALL=(root) NOPASSWD: /usr/local/sbin/netpanel-ts-routes

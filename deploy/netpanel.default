@@ -1,0 +1,7 @@
+# NetPanel settings - read by netpanel.service and netpanel-kiosk.service.
+# Installed to /etc/default/netpanel (kept on upgrade). Restart after changes:
+#   sudo systemctl restart netpanel netpanel-kiosk
+NETPANEL_ETH=eth0
+NETPANEL_WLAN=wlan0
+NETPANEL_PORT=8088
+#NETPANEL_LOG=DEBUG

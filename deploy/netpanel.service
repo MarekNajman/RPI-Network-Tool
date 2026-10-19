@@ -1,0 +1,26 @@
+# NetPanel API + web UI server (listens on 127.0.0.1:8088 only).
+# Installed to /etc/systemd/system/netpanel.service by deploy/install.sh
+
+[Unit]
+Description=NetPanel network configurator (API + web UI)
+Wants=NetworkManager.service
+After=NetworkManager.service network.target
+
+[Service]
+Type=simple
+User=netpanel
+Group=netpanel
+WorkingDirectory=/opt/netpanel
+Environment=PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+EnvironmentFile=-/etc/default/netpanel
+ExecStart=/usr/bin/python3 -m netpanel
+Restart=always
+RestartSec=2
+
+# Hardening. NoNewPrivileges must stay off: the Tailscale helper runs via sudo.
+ProtectSystem=full
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
