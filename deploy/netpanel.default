@@ -4,4 +4,6 @@
 NETPANEL_ETH=eth0
 NETPANEL_WLAN=wlan0
 NETPANEL_PORT=8088
+# Automatic logout of the admin session after N seconds without touching the screen
+NETPANEL_IDLE_TIMEOUT=300
 #NETPANEL_LOG=DEBUG

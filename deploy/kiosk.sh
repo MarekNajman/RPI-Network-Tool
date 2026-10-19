@@ -1,11 +1,13 @@
 #!/bin/bash
-# Started by cage (see netpanel-kiosk.service). Waits for the NetPanel API and
-# then runs Chromium in kiosk mode. When Chromium exits, cage exits and systemd
-# restarts the whole kiosk.
+# Runs Chromium in kiosk mode on the NetPanel UI.
+#   Wayland: started by cage   (netpanel-kiosk.service)
+#   X11:     started by xinit via kiosk-x11.sh (netpanel-kiosk-x11.service)
+# When Chromium exits, cage/xinit exit and systemd restarts the whole kiosk.
 set -u
 
 PORT="${NETPANEL_PORT:-8088}"
 URL="http://127.0.0.1:${PORT}/"
+PLATFORM="${NETPANEL_KIOSK_PLATFORM:-wayland}"
 
 BROWSER="$(command -v chromium-browser || command -v chromium || true)"
 if [ -z "$BROWSER" ]; then
@@ -27,9 +29,20 @@ PROFILE="${XDG_RUNTIME_DIR:-/tmp}/netpanel-chromium"
 rm -rf "$PROFILE"
 mkdir -p "$PROFILE"
 
+PLATFORM_ARGS=()
+if [ "$PLATFORM" = "x11" ]; then
+    # No window manager: place and size the window ourselves.
+    PLATFORM_ARGS+=(--ozone-platform=x11 --window-position=0,0 "--window-size=${NETPANEL_WINDOW_SIZE:-800,480}")
+    # Legacy framebuffer = no GPU device; avoid the GPU process crash loop.
+    ls /dev/dri/card* >/dev/null 2>&1 || PLATFORM_ARGS+=(--disable-gpu)
+else
+    PLATFORM_ARGS+=(--ozone-platform=wayland)
+fi
+echo "kiosk.sh: platform=$PLATFORM browser=$BROWSER ${PLATFORM_ARGS[*]}" >&2
+
 exec "$BROWSER" \
     --kiosk "$URL" \
-    --ozone-platform=wayland \
+    "${PLATFORM_ARGS[@]}" \
     --user-data-dir="$PROFILE" \
     --force-device-scale-factor=1 \
     --no-first-run \

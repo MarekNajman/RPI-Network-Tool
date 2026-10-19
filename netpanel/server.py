@@ -5,7 +5,9 @@ Security model (this is a single-purpose kiosk appliance):
   * rejects requests whose Host header is not localhost (DNS rebinding);
   * POST requests must carry `X-NetPanel: 1` and a JSON body, which a foreign
     web page cannot send cross-origin without a CORS preflight (never granted);
-  * strict Content-Security-Policy, no inline scripts.
+  * strict Content-Security-Policy, no inline scripts;
+  * everything except the read-only overview (/api/status) and the login
+    endpoints requires an admin session (PIN login, header X-NetPanel-Token).
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ from typing import Callable, Dict, Optional, Tuple
 from urllib.parse import urlsplit
 
 from . import __version__
+from .auth import AuthError, AuthManager
 from .backend.network import eth_network
 from .backend.runner import CommandError
 from .models import APConfig, IPv4Config, StationRequest, to_json
@@ -55,8 +58,9 @@ def _gen_password(n: int = 10) -> str:
 class Api:
     """Request handlers. Each returns (http_status, json_payload)."""
 
-    def __init__(self, backend):
+    def __init__(self, backend, auth: AuthManager):
         self.b = backend
+        self.auth = auth
         self._write_lock = threading.Lock()
         self._cache: Dict[str, Tuple[float, object]] = {}
         self._cache_lock = threading.Lock()
@@ -107,7 +111,7 @@ class Api:
 
     # ------------------------------------------------------------- GET
 
-    def status(self, _body=None):
+    def status(self, _body=None, token=None):
         eth, eth_err = self._part(lambda: self._cached("eth", 1.5, self.b.eth_status))
         wifi, wifi_err = self._part(lambda: self._cached("wifi", 1.5, self.b.wifi_status))
         ts, ts_err = self._part(lambda: self._cached("ts", 5.0, self.b.ts_status))
@@ -118,15 +122,16 @@ class Api:
             "eth": eth, "eth_error": eth_err,
             "wifi": wifi, "wifi_error": wifi_err,
             "tailscale": ts, "tailscale_error": ts_err,
+            "auth": self.auth.status(token),
         }
 
-    def health(self, _body=None):
+    def health(self, _body=None, _token=None):
         return 200, {"ok": True, "version": __version__, "demo": bool(getattr(self.b, "demo", False))}
 
-    def eth_get(self, _body=None):
+    def eth_get(self, _body=None, _token=None):
         return 200, {"ok": True, "eth": to_json(self.b.eth_status())}
 
-    def wifi_get(self, _body=None):
+    def wifi_get(self, _body=None, _token=None):
         status = self.b.wifi_status()
         ap = self.b.ap_config()
         if not ap.exists:
@@ -134,27 +139,48 @@ class Api:
             ap.password = ap.password or self._ap_default_password
         return 200, {"ok": True, "wifi": to_json(status), "ap": to_json(ap)}
 
-    def ts_get(self, _body=None):
+    def ts_get(self, _body=None, _token=None):
         ts = self.b.ts_status()
         eth = self.b.eth_status()
         return 200, {"ok": True, "tailscale": to_json(ts), "suggested": self._suggest_route(eth)}
 
+    # ------------------------------------------------------------- auth
+
+    def auth_get(self, _body=None, token=None):
+        return 200, dict(ok=True, demo=bool(getattr(self.b, "demo", False)), **self.auth.status(token))
+
+    def auth_login(self, body, _token=None):
+        try:
+            token = self.auth.login(str(body.get("pin", "")))
+        except AuthError as e:
+            # 403 (not 401): the UI treats 401 as "session expired"
+            return 403, {"ok": False, "message": e.message, "retry_after": e.retry_after,
+                         "attempts_left": e.attempts_left}
+        return 200, {"ok": True, "token": token, "idle_timeout": self.auth.idle_timeout}
+
+    def auth_logout(self, _body, token=None):
+        self.auth.logout(token)
+        return 200, {"ok": True}
+
+    def auth_ping(self, _body, _token=None):
+        return 200, {"ok": True, "idle_timeout": self.auth.idle_timeout}
+
     # ------------------------------------------------------------- POST
 
-    def eth_post(self, body):
+    def eth_post(self, body, _token=None):
         cfg = validate_ipv4_config(IPv4Config.from_dict(body))
         msg = self._write(self.b.apply_eth, cfg)
         return 200, {"ok": True, "message": msg}
 
-    def wifi_scan(self, _body):
+    def wifi_scan(self, _body, _token=None):
         nets = self.b.wifi_scan()
         return 200, {"ok": True, "networks": to_json(nets)}
 
-    def wifi_radio(self, body):
+    def wifi_radio(self, body, _token=None):
         msg = self._write(self.b.wifi_set_radio, bool(body.get("on")))
         return 200, {"ok": True, "message": msg}
 
-    def wifi_ap(self, body):
+    def wifi_ap(self, body, _token=None):
         eth = self.b.eth_status()
         avoid = [n for n in [eth_network(eth)] if n is not None]
         regdomain = None
@@ -166,16 +192,16 @@ class Api:
         msg = self._write(self.b.start_ap, cfg)
         return 200, {"ok": True, "message": msg}
 
-    def wifi_ap_stop(self, _body):
+    def wifi_ap_stop(self, _body, _token=None):
         msg = self._write(self.b.stop_ap)
         return 200, {"ok": True, "message": msg}
 
-    def wifi_station(self, body):
+    def wifi_station(self, body, _token=None):
         req = validate_station(StationRequest.from_dict(body))
         msg = self._write(self.b.connect_station, req)
         return 200, {"ok": True, "message": msg}
 
-    def ts_routes(self, body):
+    def ts_routes(self, body, _token=None):
         if body.get("clear"):
             routes = []
         elif "routes" in body:
@@ -190,6 +216,7 @@ class Api:
 ROUTES_GET = {
     "/api/health": "health",
     "/api/status": "status",
+    "/api/auth": "auth_get",
     "/api/eth": "eth_get",
     "/api/wifi": "wifi_get",
     "/api/tailscale": "ts_get",
@@ -202,7 +229,12 @@ ROUTES_POST = {
     "/api/wifi/ap/stop": "wifi_ap_stop",
     "/api/wifi/station": "wifi_station",
     "/api/tailscale/routes": "ts_routes",
+    "/api/auth/login": "auth_login",
+    "/api/auth/logout": "auth_logout",
+    "/api/auth/ping": "auth_ping",
 }
+# Reachable without login: the overview screen and the login itself.
+PUBLIC = {"health", "status", "auth_get", "auth_login", "auth_logout"}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -242,8 +274,11 @@ class Handler(BaseHTTPRequestHandler):
         return self.headers.get("Host", "") in self.allowed_hosts
 
     def _dispatch(self, name: str, body: dict):
+        token = self.headers.get("X-NetPanel-Token") or None
+        if name not in PUBLIC and not self.api.auth.check(token):
+            return self._json(401, {"ok": False, "auth_required": True, "message": "Login required."})
         try:
-            code, payload = getattr(self.api, name)(body)
+            code, payload = getattr(self.api, name)(body, token)
             self._json(code, payload)
         except ValidationError as e:
             self._json(400, {"ok": False, "message": e.message, "errors": e.errors})
@@ -311,7 +346,8 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, target.read_bytes(), ctype)
 
 
-def make_server(backend, host: str = "127.0.0.1", port: int = 8088, web_dir: Optional[Path] = None):
+def make_server(backend, host: str = "127.0.0.1", port: int = 8088, web_dir: Optional[Path] = None,
+                auth: Optional[AuthManager] = None):
     mimetypes.add_type("application/javascript", ".js")
     mimetypes.add_type("font/otf", ".otf")
     mimetypes.add_type("image/svg+xml", ".svg")
@@ -330,7 +366,7 @@ def make_server(backend, host: str = "127.0.0.1", port: int = 8088, web_dir: Opt
         log.warning("Listening on %s - the API is reachable from the network!", host)
 
     handler = type("NetPanelHandler", (Handler,), {
-        "api": Api(backend), "web_dir": web, "allowed_hosts": allowed,
+        "api": Api(backend, auth or AuthManager(None)), "web_dir": web, "allowed_hosts": allowed,
     })
     httpd = ThreadingHTTPServer((host, port), handler)
     httpd.daemon_threads = True
