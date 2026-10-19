@@ -94,6 +94,7 @@ export async function runAction({ busyText, busySub = '', fn, errorTitle = 'Oper
     return res || {};
   } catch (e) {
     b.close();
+    if (e.authRequired) return null; // session expired: the app already logged out
     if (e.errors && Object.keys(e.errors).length && onFieldErrors) onFieldErrors(e.errors);
     await alertError(errorTitle, e.message || String(e));
     return null;

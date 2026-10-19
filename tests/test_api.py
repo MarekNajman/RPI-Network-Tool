@@ -6,6 +6,7 @@ import unittest
 import urllib.error
 import urllib.request
 
+from netpanel.auth import AuthManager, hash_pin
 from netpanel.backend.demo import DemoBackend
 from netpanel.server import make_server
 
@@ -13,25 +14,32 @@ from netpanel.server import make_server
 class ApiTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.httpd = make_server(DemoBackend(delay=0.0), host="127.0.0.1", port=0)
+        auth = AuthManager(None, None, record=hash_pin("482916", iterations=1000))
+        cls.httpd = make_server(DemoBackend(delay=0.0), host="127.0.0.1", port=0, auth=auth)
         cls.port = cls.httpd.server_address[1]
         # port 0 -> real port only known now; rebuild the Host allow-list
         cls.httpd.RequestHandlerClass.allowed_hosts = {"127.0.0.1:%d" % cls.port, "localhost:%d" % cls.port}
         cls.t = threading.Thread(target=cls.httpd.serve_forever, daemon=True)
         cls.t.start()
+        cls.token = None
+        code, data, _ = cls.req(cls, "/api/auth/login", {"pin": "482916"})
+        assert code == 200, data
+        cls.token = data["token"]
 
     @classmethod
     def tearDownClass(cls):
         cls.httpd.shutdown()
         cls.httpd.server_close()
 
-    def req(self, path, body=None, headers=None):
+    def req(self, path, body=None, headers=None, token=True):
         url = "http://127.0.0.1:%d%s" % (self.port, path)
         data = None
         h = {}
+        if token and self.token:
+            h["X-NetPanel-Token"] = self.token
         if body is not None:
             data = json.dumps(body).encode()
-            h = {"Content-Type": "application/json", "X-NetPanel": "1"}
+            h.update({"Content-Type": "application/json", "X-NetPanel": "1"})
         h.update(headers or {})
         r = urllib.request.Request(url, data=data, headers=h, method="POST" if body is not None else "GET")
         try:
@@ -39,6 +47,37 @@ class ApiTests(unittest.TestCase):
                 return resp.status, json.loads(resp.read() or b"{}"), resp.headers
         except urllib.error.HTTPError as e:
             return e.code, json.loads(e.read() or b"{}"), e.headers
+
+    def test_auth_required(self):
+        for path in ("/api/eth", "/api/wifi", "/api/tailscale"):
+            code, data, _ = self.req(path, token=False)
+            self.assertEqual(code, 401, path)
+            self.assertTrue(data["auth_required"])
+        code, _, _ = self.req("/api/eth", {"method": "auto"}, token=False)
+        self.assertEqual(code, 401)
+        code, _, _ = self.req("/api/eth", headers={"X-NetPanel-Token": "forged"}, token=False)
+        self.assertEqual(code, 401)
+        # the overview stays public and reports the session state
+        code, data, _ = self.req("/api/status", token=False)
+        self.assertEqual(code, 200)
+        self.assertFalse(data["auth"]["logged_in"])
+        _, data, _ = self.req("/api/status")
+        self.assertTrue(data["auth"]["logged_in"])
+
+    def test_wrong_pin_is_403(self):
+        code, data, _ = self.req("/api/auth/login", {"pin": "000000"}, token=False)
+        self.assertEqual(code, 403)
+        self.assertIn("Wrong PIN", data["message"])
+        self.req("/api/auth/login", {"pin": "482916"}, token=False)  # reset the counter
+
+    def test_logout(self):
+        _, data, _ = self.req("/api/auth/login", {"pin": "482916"}, token=False)
+        tok = data["token"]
+        code, _, _ = self.req("/api/eth", headers={"X-NetPanel-Token": tok}, token=False)
+        self.assertEqual(code, 200)
+        self.req("/api/auth/logout", {}, headers={"X-NetPanel-Token": tok}, token=False)
+        code, _, _ = self.req("/api/eth", headers={"X-NetPanel-Token": tok}, token=False)
+        self.assertEqual(code, 401)
 
     def test_status(self):
         code, data, _ = self.req("/api/status")

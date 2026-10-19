@@ -1,7 +1,10 @@
-// NetPanel web UI - router, status polling, kiosk hardening.
+// NetPanel web UI - router, status polling, admin session, kiosk hardening.
 
-import { api } from './api.js';
-import { h, icon } from './dom.js';
+import { api, setAuthHandler } from './api.js';
+import { h, icon, setText } from './dom.js';
+import { showLogin } from './login.js';
+import { session, WARN_BEFORE_MS } from './session.js';
+import { toast } from './ui.js';
 import { createHome } from './pages/home.js';
 import { createEth } from './pages/eth.js';
 import { createWifi } from './pages/wifi.js';
@@ -9,16 +12,21 @@ import { createStation } from './pages/station.js';
 import { createTailscale } from './pages/tailscale.js';
 
 const POLL_MS = 4000;
+const PUBLIC_PAGES = new Set(['home']); // everything else needs the admin PIN
 
 const app = {
   status: null,
   pages: {},
   current: 'home',
   history: [],
+  session,
 
-  go(name, params = {}, { replace = false } = {}) {
+  async go(name, params = {}, { replace = false } = {}) {
     const page = this.pages[name];
     if (!page) return;
+    if (!PUBLIC_PAGES.has(name) && !session.loggedIn) {
+      if (!(await this.login())) return;
+    }
     if (!replace && this.current !== name) this.history.push(this.current);
     this._show(name, params);
   },
@@ -31,6 +39,19 @@ const app = {
   home() {
     this.history = [];
     this._show('home', {});
+  },
+
+  async login(reason = '') {
+    const ok = await showLogin({ reason });
+    if (ok) {
+      toast('Logged in. Auto logout after 5 min of inactivity.', 'info');
+      this.refresh();
+    }
+    return ok;
+  },
+
+  logout(reason = 'manual') {
+    session.logout(reason);
   },
 
   _show(name, params, isBack = false) {
@@ -46,6 +67,8 @@ const app = {
       const s = await api('status');
       this.status = s;
       offline(false);
+      // Session dropped on the server (service restart, PIN changed) -> log out here too.
+      if (session.loggedIn && s.auth && !s.auth.logged_in) session.logout('expired');
       for (const p of Object.values(this.pages)) if (p.update && (p === this.pages.home || p.el.classList.contains('active'))) p.update(s);
     } catch (e) {
       offline(!!e.offline);
@@ -53,18 +76,73 @@ const app = {
   },
 };
 
+// ------------------------------------------------------------------ session handling
+const LOGOUT_TEXT = {
+  manual: 'Logged out.',
+  idle: 'Logged out after 5 minutes of inactivity.',
+  expired: 'Session expired - please log in again.',
+};
+
+session.onChange((loggedIn, reason) => {
+  if (!loggedIn) {
+    // Close every editor/dialog and return to the public overview.
+    window.dispatchEvent(new Event('netpanel-reset'));
+    document.getElementById('layer').replaceChildren();
+    idleBanner(false);
+    app.home();
+    toast(LOGOUT_TEXT[reason] || LOGOUT_TEXT.manual, reason === 'manual' ? 'info' : 'err');
+  }
+  app.pages.home.updateSession();
+});
+
+// Any 401 from the API = our session is gone.
+setAuthHandler(() => { if (session.loggedIn) session.logout('expired'); });
+
+let banner = null;
+let bannerText = null;
+function idleBanner(seconds) {
+  if (seconds === false) {
+    if (banner) { banner.remove(); banner = null; }
+    return;
+  }
+  if (!banner) {
+    bannerText = h('span');
+    banner = h('div', { class: 'idle-banner' }, icon('lock'), bannerText);
+    document.body.append(banner);
+  }
+  setText(bannerText, `Auto logout in ${seconds} s - touch the screen to stay logged in`);
+}
+
+function sessionTick() {
+  session.tick();
+  if (!session.loggedIn) return;
+  const left = session.remainingMs();
+  if (left <= WARN_BEFORE_MS) idleBanner(Math.max(1, Math.ceil(left / 1000)));
+  else idleBanner(false);
+  app.pages.home.updateSession();
+}
+
+function trackActivity() {
+  const touch = () => {
+    if (!session.loggedIn) return;
+    session.touch();
+    if (banner) idleBanner(false);
+  };
+  for (const ev of ['pointerdown', 'keydown', 'touchstart']) document.addEventListener(ev, touch, { capture: true, passive: true });
+}
+
 // ------------------------------------------------------------------ offline banner
 let failures = 0;
-let banner = null;
+let offBanner = null;
 function offline(isOffline) {
   failures = isOffline ? failures + 1 : 0;
   const show = failures >= 2;
-  if (show && !banner) {
-    banner = h('div', { class: 'offline-banner' }, icon('warn'), 'NetPanel service is not responding - retrying…');
-    document.body.append(banner);
-  } else if (!show && banner) {
-    banner.remove();
-    banner = null;
+  if (show && !offBanner) {
+    offBanner = h('div', { class: 'offline-banner' }, icon('warn'), 'NetPanel service is not responding - retrying…');
+    document.body.append(offBanner);
+  } else if (!show && offBanner) {
+    offBanner.remove();
+    offBanner = null;
   }
 }
 
@@ -93,6 +171,7 @@ function harden() {
 // ------------------------------------------------------------------ boot
 function boot() {
   harden();
+  trackActivity();
   const root = document.getElementById('app');
   app.pages = {
     home: createHome(app),
@@ -103,8 +182,11 @@ function boot() {
   };
   for (const p of Object.values(app.pages)) root.append(p.el);
   app._show('home', {});
+  app.pages.home.updateSession();
+  session.info().catch(() => {});
   app.refresh();
   setInterval(() => { if (!document.hidden) app.refresh(); }, POLL_MS);
+  setInterval(sessionTick, 1000);
   window.netpanel = app; // handy for debugging via remote devtools / tests
 }
 
