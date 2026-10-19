@@ -104,9 +104,12 @@ export function openInput({
     }
     function finish(result) {
       document.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('netpanel-reset', onReset);
       root.remove();
       resolve(result);
     }
+    // Logout (manual or automatic) closes the editor without applying anything.
+    const onReset = () => finish(null);
     function done() {
       if (errorOf(val)) {
         attempted = true;
@@ -242,6 +245,7 @@ export function openInput({
       e.stopPropagation();
     }
     document.addEventListener('keydown', onKey, true);
+    window.addEventListener('netpanel-reset', onReset);
 
     buildKeys();
     clearToasts();

@@ -57,9 +57,24 @@ def main() -> int:
 
             shot("01-home")
 
-            # ---------------- Ethernet
+            def pin(digits):
+                for d in digits:
+                    page.locator(".keypad.pin .key", has_text=d).first.tap()
+                page.locator(".keypad.pin .key.done").tap()
+
+            # ---------------- Login (any page except home needs the PIN)
             tap(".tile.eth")
+            page.wait_for_selector(".kb.login")
+            page.wait_for_timeout(300)
+            shot("21-login")
+            pin("111111")
+            page.wait_for_selector(".login-msg.bad")
+            shot("22-login-wrong-pin")
+            pin("123456")
+
+            # ---------------- Ethernet
             page.wait_for_selector("#page-eth.active")
+            page.wait_for_selector(".toast", state="detached", timeout=8000)
             shot("02-ethernet-dhcp")
             page.locator("#page-eth .seg button", has_text="Static IP").tap()
             shot("03-ethernet-static")
@@ -134,6 +149,22 @@ def main() -> int:
             page.evaluate("window.netpanel.refresh()")
             page.wait_for_selector(".toast", state="detached", timeout=8000)
             shot("19-home-after")
+
+            # ---------------- inactivity: warning 30 s before, then automatic logout
+            page.evaluate("window.netpanel.session.lastActivity = Date.now() - (window.netpanel.session.idleMs - 25000)")
+            page.wait_for_selector(".idle-banner", timeout=3000)
+            shot("24-idle-warning")
+            page.evaluate("window.netpanel.session.lastActivity = Date.now() - window.netpanel.session.idleMs - 1000")
+            page.wait_for_selector(".btn-session:not(.on)", timeout=3000)
+            page.wait_for_selector(".toast.err")
+            shot("25-auto-logout")
+            # log in again from the topbar button
+            tap(".btn-session")
+            page.wait_for_selector(".kb.login")
+            pin("123456")
+            page.wait_for_selector(".btn-session.on")
+            page.wait_for_selector(".toast", state="detached", timeout=8000)
+            shot("23-home-logged-in")
 
             # ---------------- error path: wrong Wi-Fi password
             page.evaluate("window.netpanel.go('wifi')")

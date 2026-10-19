@@ -368,3 +368,40 @@ button:focus { outline: none; }
 .grid3 { display: grid; grid-template-columns: 1.2fr .7fr 1.2fr; gap: 10px 12px; }
 .kv.stack { grid-template-columns: 1fr; gap: 1px; }
 .kv.stack dd { margin-bottom: 7px; }
+
+/* ------------------------------------------------------------------ login / session */
+.topbar .host { max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.btn-session { height: 40px; display: inline-flex; align-items: center; gap: 8px; padding: 0 14px 0 10px;
+  border-radius: 12px; border: 1px solid var(--border); background: var(--surface-2); font-size: 15px; font-weight: 700;
+  color: var(--text); flex: none; }
+.btn-session .i { width: 20px; height: 20px; color: var(--dim); }
+.btn-session small { font-size: 13px; font-weight: 600; color: var(--dim); min-width: 34px; text-align: right; }
+.btn-session.on { border-color: rgba(34, 197, 94, .55); background: rgba(34, 197, 94, .1); }
+.btn-session.on .i { color: var(--ok); }
+.btn-session:active { background: var(--pressed); }
+.tile-head .go { margin-left: auto; color: var(--dim-2); display: flex; }
+.tile-head .go .i { width: 22px; height: 22px; }
+
+.kb.login .kb-left { justify-content: flex-start; }
+.login-head { display: flex; align-items: center; gap: 14px; margin-top: 4px; }
+.login-ic { width: 60px; height: 60px; border-radius: 16px; display: flex; align-items: center; justify-content: center;
+  background: rgba(59, 130, 246, .15); color: var(--accent); flex: none; }
+.login-ic .i { width: 34px; height: 34px; }
+.login-title { font-size: 24px; font-weight: 700; }
+.login-sub { font-size: 15px; color: var(--dim); margin-top: 3px; line-height: 1.35; }
+.pin-dots { display: flex; gap: 14px; align-items: center; justify-content: center; height: 76px; margin-top: 26px;
+  border-radius: 16px; background: var(--surface); border: 2px solid var(--accent); padding: 0 16px; flex-wrap: nowrap; }
+.pin-dots span { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--dim-2); flex: none; }
+.pin-dots span.on { background: var(--text); border-color: var(--text); }
+.login-msg { min-height: 44px; margin-top: 12px; font-size: 15px; color: var(--dim); line-height: 1.4; white-space: pre-line; }
+.login-msg.bad { color: #fca5a5; }
+.keypad.pin { grid-template-columns: repeat(3, 1fr); width: 352px; }
+.keypad.pin .key { font-size: 30px; }
+.keypad.pin .key.done { grid-column: auto; }
+.keypad.pin .key.done .i { width: 34px; height: 34px; }
+
+.idle-banner { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 96; pointer-events: none;
+  display: flex; align-items: center; gap: 10px; padding: 12px 20px; border-radius: 14px; font-size: 16px; font-weight: 700;
+  background: #3a2a06; border: 1px solid rgba(245, 158, 11, .7); color: #fde68a; box-shadow: 0 10px 30px rgba(0, 0, 0, .55);
+  white-space: nowrap; animation: toastIn .18s ease-out; }
+.idle-banner .i { width: 22px; height: 22px; }

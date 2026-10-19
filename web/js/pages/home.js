@@ -1,6 +1,7 @@
 // Home: Ethernet + Wi-Fi tiles on top, Tailscale section below.
 
 import { h, icon, setText, setPill, cidr } from '../dom.js';
+import { session } from '../session.js';
 import { ethPill, ethMode, wifiPill, wifiMode, tsPill, tsIPv4, routeApproved } from '../status.js';
 
 function makeTile({ cls, iconName, name, labels, onTap }) {
@@ -10,13 +11,14 @@ function makeTile({ cls, iconName, name, labels, onTap }) {
   const dl = h('dl', { class: 'kv' });
   labels.forEach((l, i) => dl.append(h('dt', null, l), dds[i]));
   dds[0].classList.add('big');
+  const go = h('span', { class: 'go' }, icon('chevron'));
   const el = h('button', { class: `tile ${cls}`, type: 'button', onclick: onTap },
     h('div', { class: 'tile-head' },
       h('span', { class: 'ibox' }, icon(iconName)),
       h('div', null, h('div', { class: 'tile-name' }, name), sub),
-      icon('chevron', 'go')),
+      go),
     pill, dl);
-  return { el, sub, pill, dds };
+  return { el, sub, pill, dds, go };
 }
 
 export function createHome(app) {
@@ -25,9 +27,17 @@ export function createHome(app) {
   const tempTxt = h('span', null, '--');
   const temp = h('span', { class: 'chip num' }, icon('temp'), tempTxt);
   const clock = h('span', { class: 'clock num' });
+  // Login / Logout button with the time left until the automatic logout.
+  const sessIcon = h('span');
+  const sessLabel = h('span');
+  const sessTime = h('small', { class: 'num' });
+  const sessBtn = h('button', {
+    class: 'btn-session', type: 'button',
+    onclick: () => (session.loggedIn ? app.logout('manual') : app.login()),
+  }, sessIcon, sessLabel, sessTime);
   const top = h('header', { class: 'topbar' },
     h('div', { class: 'brand' }, icon('logo'), 'NetPanel'), host,
-    h('div', { class: 'spacer' }), demo, temp, clock);
+    h('div', { class: 'spacer' }), demo, temp, sessBtn, clock);
 
   const eth = makeTile({ cls: 'eth', iconName: 'ethernet', name: 'Ethernet', labels: ['IP', 'Gateway'], onTap: () => app.go('eth') });
   const wifi = makeTile({ cls: 'wifi', iconName: 'wifi', name: 'Wi-Fi', labels: ['IP', 'SSID'], onTap: () => app.go('wifi') });
@@ -45,6 +55,7 @@ export function createHome(app) {
     h('dl', { class: 'kv' }, h('dt', null, 'Tailscale IP'), tsIp, h('dt', null, 'Advertised'), tsAdv));
   const advBtn = h('button', { class: 'adv-btn', type: 'button', onclick: () => app.go('ts') },
     icon('subnet'), h('b', null, 'Advertise subnet'), h('span', { class: 's' }, 'Share LAN via Tailscale'));
+  const advSub = advBtn.querySelector('.s');
   const tsCard = h('section', { class: 'ts-card' }, tsInfo, advBtn);
 
   const el = h('section', { class: 'page', id: 'page-home' },
@@ -89,5 +100,23 @@ export function createHome(app) {
     }
   }
 
-  return { el, update };
+  let lastState = null;
+  function updateSession() {
+    const inn = session.loggedIn;
+    if (inn !== lastState) {
+      lastState = inn;
+      sessBtn.classList.toggle('on', inn);
+      sessIcon.replaceChildren(icon(inn ? 'unlock' : 'lock'));
+      setText(sessLabel, inn ? 'Logout' : 'Login');
+      for (const t of [eth, wifi]) t.go.replaceChildren(icon(inn ? 'chevron' : 'lock'));
+      setText(advSub, inn ? 'Share LAN via Tailscale' : 'PIN required');
+    }
+    if (inn) {
+      const s = Math.max(0, Math.ceil(session.remainingMs() / 1000));
+      setText(sessTime, `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`);
+    } else setText(sessTime, '');
+    sessTime.classList.toggle('hidden', !inn);
+  }
+
+  return { el, update, updateSession };
 }
