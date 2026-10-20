@@ -37,6 +37,17 @@ export function confirm({ title, text, code, extra, ok = 'Apply', cancel = 'Canc
   });
 }
 
+// Information dialog with a single Close button.
+export function info({ title, iconName = 'info', text, extra }) {
+  return new Promise((resolve) => {
+    let ov;
+    ov = modal({
+      iconName, title, text, extra,
+      actions: [h('button', { class: 'btn primary', type: 'button', onclick: () => { ov.remove(); resolve(); } }, 'Close')],
+    });
+  });
+}
+
 export function alertError(title, text) {
   return new Promise((resolve) => {
     let ov;
@@ -105,8 +116,9 @@ export async function runAction({ busyText, busySub = '', fn, errorTitle = 'Oper
 
 export class Field {
   // kind: ip | mask | prefix | cidr | iplist | number | text | password | choice
+  // compact: no label/message row (label is still the keyboard title); errors only colour the box.
   constructor({ label, kind = 'text', value = '', placeholder = '', optional = false, presets, validate,
-    hint, onChange, onTap, reveal = false, tag = '' }) {
+    hint, onChange, onTap, reveal = false, tag = '', compact = false, cls = '' }) {
     Object.assign(this, { label, kind, placeholder, optional, presets, validate, hint, onChange, onTap });
     this._value = value || '';
     this.readonly = false;
@@ -123,7 +135,9 @@ export class Field {
       this.box.append(icon('chevron', 'tail'));
     }
     this.box.addEventListener('click', () => this.tap());
-    this.el = h('div', { class: 'field' }, h('label', null, label, this.tagEl), this.box, this.msgEl);
+    this.el = compact
+      ? h('div', { class: `field compact ${cls}`.trim() }, this.box)
+      : h('div', { class: `field ${cls}`.trim() }, h('label', null, label, this.tagEl), this.box, this.msgEl);
     this.render();
   }
 

@@ -10,6 +10,7 @@ from typing import List
 
 from ..models import APConfig, EthStatus, IPv4Config, StationRequest, TailscaleStatus, WifiNetwork, WifiStatus
 from . import system
+from .lanscan import LanScanner, ScanManager
 from .network import NetworkBackend
 from .tailscale import TailscaleBackend
 
@@ -20,6 +21,7 @@ class Backend:
     def __init__(self, eth: str = "eth0", wlan: str = "wlan0"):
         self.net = NetworkBackend(eth=eth, wlan=wlan)
         self.ts = TailscaleBackend()
+        self.scan = ScanManager(LanScanner())  # LAN scan jobs (see lanscan.py)
 
     def system(self) -> dict:
         return {"hostname": system.hostname(), "cpu_temp": system.cpu_temp(), "uptime": system.uptime_s(), "demo": False}

@@ -110,7 +110,8 @@ log "Installing packages"
 # polkitd: lets the netpanel user talk to NetworkManager (rule below)
 # nftables: NAT for the Wi-Fi access point (ipv4.method shared); the nftables
 #           *service* stays disabled, only the nft tool is used by NetworkManager.
-PKGS=(python3 iw network-manager dnsmasq-base polkitd nftables sudo)
+# iproute2 + ieee-data: LAN scan (neighbour table via `ip -j`, MAC vendor database)
+PKGS=(python3 iw network-manager dnsmasq-base polkitd nftables sudo iproute2 ieee-data)
 if [ "$KIOSK" = 1 ]; then
     PKGS+=(fonts-dejavu-core)
     if [ "$KIOSK_MODE" = x11 ]; then

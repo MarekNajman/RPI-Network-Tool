@@ -15,10 +15,12 @@
 .i-logo { --ic: url("/icons/logo.svg"); }
 .i-plus { --ic: url("/icons/plus.svg"); }
 .i-power { --ic: url("/icons/power.svg"); }
+.i-radar { --ic: url("/icons/radar.svg"); }
 .i-radio { --ic: url("/icons/radio.svg"); }
 .i-refresh { --ic: url("/icons/refresh.svg"); }
 .i-shift { --ic: url("/icons/shift.svg"); }
 .i-station { --ic: url("/icons/station.svg"); }
+.i-stop { --ic: url("/icons/stop.svg"); }
 .i-subnet { --ic: url("/icons/subnet.svg"); }
 .i-temp { --ic: url("/icons/temp.svg"); }
 .i-unlock { --ic: url("/icons/unlock.svg"); }

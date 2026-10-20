@@ -10,6 +10,7 @@ import { createEth } from './pages/eth.js';
 import { createWifi } from './pages/wifi.js';
 import { createStation } from './pages/station.js';
 import { createTailscale } from './pages/tailscale.js';
+import { createScan } from './pages/scan.js';
 
 const POLL_MS = 4000;
 const PUBLIC_PAGES = new Set(['home']); // everything else needs the admin PIN
@@ -179,6 +180,7 @@ function boot() {
     wifi: createWifi(app),
     station: createStation(app),
     ts: createTailscale(app),
+    scan: createScan(app),
   };
   for (const p of Object.values(app.pages)) root.append(p.el);
   app._show('home', {});
