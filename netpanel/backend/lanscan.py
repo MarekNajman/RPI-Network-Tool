@@ -92,15 +92,40 @@ class ScanBusy(Exception):
 # --------------------------------------------------------------------------- parsers (pure, unit tested)
 
 
+NO_ARP_FLAGS = {"LOOPBACK", "POINTOPOINT", "NOARP"}
+
+
+def link_skip_reason(link: dict) -> str:
+    """Why an interface cannot be ARP-scanned ('' = usable).
+
+    Note: with a family filter (`ip -4 ...`) iproute2 omits link_type and the MAC
+    address, so a missing link_type is accepted and the flags decide.
+    """
+    name = link.get("ifname", "")
+    flags = set(link.get("flags") or [])
+    if not name:
+        return "no name"
+    if flags & NO_ARP_FLAGS:
+        return "no ARP (%s)" % ",".join(sorted(flags & NO_ARP_FLAGS))
+    if name.startswith(SKIP_IFACES):
+        return "virtual/VPN interface"
+    if link.get("link_type") not in (None, "ether"):
+        return "link type %s" % link.get("link_type")
+    if "UP" not in flags:
+        return "interface is down"
+    if not any(a.get("family") == "inet" and a.get("scope", "global") == "global" and int(a.get("prefixlen", 32)) < 32
+               for a in link.get("addr_info") or []):
+        return "no IPv4 network address"
+    return ""
+
+
 def parse_addrs(text: str) -> List[LocalNet]:
-    """`ip -j -4 addr show` -> directly connected Ethernet-like IPv4 networks."""
+    """`ip -j addr show` -> directly connected Ethernet-like IPv4 networks."""
     out: List[LocalNet] = []
     for link in json.loads(text or "[]"):
-        name = link.get("ifname", "")
-        if not name or name.startswith(SKIP_IFACES) or link.get("link_type") != "ether":
+        if link_skip_reason(link):
             continue
-        if "UP" not in (link.get("flags") or []):
-            continue
+        name = link["ifname"]
         for a in link.get("addr_info") or []:
             if a.get("family") != "inet" or a.get("scope", "global") != "global":
                 continue
@@ -395,7 +420,11 @@ class LanScanner:
 
     # ---- system information
     def local_networks(self) -> List[LocalNet]:
-        return parse_addrs(self._run(["ip", "-j", "-4", "addr", "show"], timeout=5, quiet=True).stdout)
+        return parse_addrs(self.addr_json())
+
+    def addr_json(self) -> str:
+        # No "-4" here: with a family filter iproute2 leaves out link_type and the MAC address.
+        return self._run(["ip", "-j", "addr", "show"], timeout=5, quiet=True).stdout
 
     def gateways(self) -> Set[str]:
         try:
@@ -730,8 +759,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(message)s")
 
     scanner = LanScanner()
-    nets = scanner.local_networks()
+    try:
+        nets = scanner.local_networks()
+    except CommandError as e:
+        print("error:", e.message)
+        return 2
     print("directly connected:", ", ".join("%s %s" % (n.iface, n.network) for n in nets) or "none")
+    if not nets:
+        print("interfaces seen (`ip -j addr show`):")
+        for link in json.loads(scanner.addr_json() or "[]"):
+            inet = [("%s/%s" % (a.get("local"), a.get("prefixlen"))) for a in link.get("addr_info") or []
+                    if a.get("family") == "inet"]
+            print("  %-12s %-28s %s" % (link.get("ifname"), ",".join(inet) or "-",
+                                         link_skip_reason(link) or "usable (?)"))
     if args.range:
         network, _, prefix = args.range.partition("/")
         prefix = prefix or "24"

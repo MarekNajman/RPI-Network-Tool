@@ -29,7 +29,8 @@ ADDR_JSON = json.dumps([
     {"ifindex": 2, "ifname": "eth0", "flags": ["BROADCAST", "MULTICAST", "UP", "LOWER_UP"], "link_type": "ether",
      "address": "dc:a6:32:4b:7e:01",
      "addr_info": [{"family": "inet", "local": "192.168.10.57", "prefixlen": 24, "broadcast": "192.168.10.255",
-                    "scope": "global", "dynamic": True, "noprefixroute": True, "label": "eth0"}]},
+                    "scope": "global", "dynamic": True, "noprefixroute": True, "label": "eth0"},
+                   {"family": "inet6", "local": "fe80::1c2d:3e4f:5a6b:7c8d", "prefixlen": 64, "scope": "link"}]},
     {"ifindex": 3, "ifname": "wlan0", "flags": ["BROADCAST", "MULTICAST", "UP", "LOWER_UP"], "link_type": "ether",
      "address": "dc:a6:32:4b:7e:02",
      "addr_info": [{"family": "inet", "local": "10.42.0.1", "prefixlen": 24, "scope": "global", "label": "wlan0"}]},
@@ -41,6 +42,21 @@ ADDR_JSON = json.dumps([
     {"ifindex": 6, "ifname": "eth1", "flags": ["BROADCAST", "MULTICAST"], "link_type": "ether",
      "address": "00:e0:4c:00:00:01",
      "addr_info": [{"family": "inet", "local": "10.9.9.9", "prefixlen": 24, "scope": "global"}]},
+])
+
+
+# What `ip -j -4 addr show` really prints: with a family filter iproute2 omits
+# link_type and the MAC address (ipaddress.c: print only if !filter.family ...).
+# The first version relied on link_type and found no network on a real Pi.
+ADDR4_JSON = json.dumps([
+    {"ifindex": 1, "ifname": "lo", "flags": ["LOOPBACK", "UP", "LOWER_UP"], "mtu": 65536, "operstate": "UNKNOWN",
+     "addr_info": [{"family": "inet", "local": "127.0.0.1", "prefixlen": 8, "scope": "host", "label": "lo"}]},
+    {"ifindex": 2, "ifname": "eth0", "flags": ["BROADCAST", "MULTICAST", "UP", "LOWER_UP"], "mtu": 1500,
+     "operstate": "UP",
+     "addr_info": [{"family": "inet", "local": "192.168.10.57", "prefixlen": 24, "broadcast": "192.168.10.255",
+                    "scope": "global", "dynamic": True, "label": "eth0"}]},
+    {"ifindex": 4, "ifname": "tailscale0", "flags": ["POINTOPOINT", "MULTICAST", "NOARP", "UP", "LOWER_UP"],
+     "addr_info": [{"family": "inet", "local": "100.101.102.103", "prefixlen": 32, "scope": "global"}]},
 ])
 
 
@@ -62,6 +78,20 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(nets[0].mac, "dc:a6:32:4b:7e:01")
         self.assertEqual(nets[0].to_json(), {"iface": "eth0", "address": "192.168.10.57", "network": "192.168.10.0",
                                              "prefix": 24, "cidr": "192.168.10.0/24"})
+
+    def test_parse_addrs_without_link_info(self):
+        nets = ls.parse_addrs(ADDR4_JSON)
+        self.assertEqual([(n.iface, str(n.network), n.mac) for n in nets], [("eth0", "192.168.10.0/24", "")])
+
+    def test_skip_reasons(self):
+        links = {l["ifname"]: l for l in json.loads(ADDR_JSON)}
+        self.assertEqual(ls.link_skip_reason(links["eth0"]), "")
+        self.assertIn("no ARP", ls.link_skip_reason(links["lo"]))
+        self.assertEqual(ls.link_skip_reason(links["docker0"]), "virtual/VPN interface")
+        self.assertEqual(ls.link_skip_reason(links["eth1"]), "interface is down")
+        self.assertEqual(ls.link_skip_reason({"ifname": "eth2", "flags": ["UP"], "link_type": "ether",
+                                              "addr_info": []}), "no IPv4 network address")
+        self.assertEqual(ls.link_skip_reason({"ifname": "can0", "flags": ["UP"], "link_type": "can"}), "link type can")
 
     def test_parse_neigh(self):
         t = ls.parse_neigh(neigh_json([("192.168.10.1", "REACHABLE", "4C:5E:0C:AA:10:01"),
@@ -216,6 +246,24 @@ class FakeRun:
         elif "route" in args:
             R.stdout = json.dumps([{"dst": "default", "gateway": "192.168.10.1", "dev": "eth0"}])
         return R
+
+
+class SystemCallTests(unittest.TestCase):
+    def test_addr_command_has_no_family_filter(self):
+        run = FakeRun([neigh_json([])])
+        nets = ls.LanScanner(oui=ls.OuiDB(csv_paths=[], fallbacks=()), runner=run).local_networks()
+        self.assertEqual(run.calls[0], ["ip", "-j", "addr", "show"])
+        self.assertEqual([n.mac for n in nets], ["dc:a6:32:4b:7e:01", "dc:a6:32:4b:7e:02"])
+
+    def test_cli_runs_without_runpy_warning(self):
+        import subprocess
+        import sys
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        p = subprocess.run([sys.executable, "-W", "error::RuntimeWarning", "-m", "netpanel.backend.lanscan", "--help"],
+                           cwd=root, capture_output=True, text=True, timeout=30)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertNotIn("RuntimeWarning", p.stderr)
+        self.assertIn("usage", p.stdout)
 
 
 class DiscoveryTests(unittest.TestCase):

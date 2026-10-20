@@ -10,7 +10,6 @@ from typing import List
 
 from ..models import APConfig, EthStatus, IPv4Config, StationRequest, TailscaleStatus, WifiNetwork, WifiStatus
 from . import system
-from .lanscan import LanScanner, ScanManager
 from .network import NetworkBackend
 from .tailscale import TailscaleBackend
 
@@ -21,6 +20,9 @@ class Backend:
     def __init__(self, eth: str = "eth0", wlan: str = "wlan0"):
         self.net = NetworkBackend(eth=eth, wlan=wlan)
         self.ts = TailscaleBackend()
+        # Imported here, not at module level: `python3 -m netpanel.backend.lanscan`
+        # (the SSH debug CLI) must not find the module already imported by the package.
+        from .lanscan import LanScanner, ScanManager
         self.scan = ScanManager(LanScanner())  # LAN scan jobs (see lanscan.py)
 
     def system(self) -> dict:
