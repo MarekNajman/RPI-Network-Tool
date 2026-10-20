@@ -652,6 +652,9 @@ cd /opt/netpanel && sudo -u netpanel python3 -m netpanel.backend.lanscan 192.168
 ip -4 neigh show dev eth0          # co jádro ví o sousedech (REACHABLE = odpověděl)
 ```
 
+Když vypíše `directly connected: none`, hned pod tím vypíše všechna rozhraní z `ip -j addr show` a důvod,
+proč je přeskočil (`interface is down`, `no IPv4 network address`, `no ARP (LOOPBACK)` …).
+
 ## Přihlášení: admin PIN a automatické odhlášení
 
 | Stav | Co jde |
@@ -780,6 +783,7 @@ python3 tools/screenshots.py                    # průchod UI + screenshoty (vy�
 | Odhlašuje to během práce | Auto-logout po 5 min bez dotyku; delší čas: `NETPANEL_IDLE_TIMEOUT` v `/etc/default/netpanel`. |
 | `install.sh`: „/bin/bash^M: bad interpreter“ | Soubory byly uloženy s Windows konci řádků (CRLF). Oprava na Pi: `sed -i 's/\r$//' deploy/*.sh deploy/*.py deploy/netpanel-ts-routes deploy/netpanel-passwd deploy/*.service deploy/*.conf deploy/netpanel.*` |
 | LAN scan: všude „Unknown“ ve sloupci Vendor | Chybí databáze výrobců: `sudo apt install ieee-data` (stav ukáže i řádek pod výsledkem). |
+| LAN scan / SSH test: `directly connected: none` | Verze 1.0 četla `ip -j -4 addr`, kde iproute2 vynechává typ linky a MAC → nenašla žádnou síť. Opraveno – nahraj novou verzi a spusť znovu `install.sh`. Když to přetrvá, CLI vypíše rozhraní a důvod přeskočení. |
 | LAN scan: „not inside a directly connected network“ | Rozsah musí ležet v síti eth0/wlan0 (viz tlačítka pod hláškou). Sítě za routerem skenovat nejde – záměrně. |
 | LAN scan najde jen bránu / skoro nic přes Wi-Fi | Wi-Fi síť má izolaci klientů – ARP na ostatní klienty neprojde. Skenuj přes eth0. |
 | LAN scan: prázdné názvy | Normální, viz [Co od toho čekat](#co-od-toho-nečekat). Kontrola z SSH: `sudo -u netpanel python3 -m netpanel.backend.lanscan`. |
