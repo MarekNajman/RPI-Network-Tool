@@ -7,12 +7,14 @@ little so the UI's busy/rollback paths can be exercised on any PC.
 from __future__ import annotations
 
 import copy
+import ipaddress
 import threading
 import time
-from typing import List
+from typing import Dict, List
 
 from ..models import APConfig, EthStatus, IPv4Config, StationRequest, TailscaleStatus, WifiNetwork, WifiStatus
 from ..validation import netmask_from_prefix
+from .lanscan import LocalNet, ScanManager
 from .nmparse import classify_security
 from .runner import CommandError
 from .tailscale import command_preview
@@ -26,6 +28,80 @@ _NETWORKS = [
     ("Printer-Direct", 31, "WPA2", 6, 2437),
     ("Meeting-Room", 22, "WPA2 WPA3", 48, 5240),
 ]
+
+
+# LAN scan demo: (offset in the scanned network, MAC, vendor as registered, names by source)
+_DEMO_HOSTS = [
+    (1, "4c:5e:0c:aa:10:01", "Routerboard.com", {"dns": "gw.office.lan"}),
+    (5, "f0:9f:c2:12:34:56", "Ubiquiti Networks Inc.", {"mdns": "office-ap"}),
+    (12, "00:11:32:ab:cd:ef", "Synology Incorporated", {"mdns": "nas01", "netbios": "NAS01", "dns": "nas01.office.lan"}),
+    (20, "3c:52:82:11:22:33", "Hewlett Packard", {"mdns": "HP-LaserJet-M404"}),
+    (23, "18:66:da:44:55:66", "Dell Inc.", {"netbios": "WS-ENG-07", "dns": "ws-eng-07.office.lan"}),
+    (31, "da:7f:3e:9a:01:02", "", {}),
+    (42, "24:6f:28:7a:8b:9c", "Espressif Inc.", {}),
+    (77, "c0:56:e3:01:02:03", "Hangzhou Hikvision Digital Technology Co.,Ltd.", {"dns": "cam-gate.office.lan"}),
+    (101, "00:1b:1b:5e:6f:70", "Siemens AG", {}),
+    (120, "b8:27:eb:10:20:30", "Raspberry Pi Foundation", {"mdns": "raspberrypi"}),
+    (150, "6a:1e:2b:3c:4d:5e", "", {"mdns": "Galaxy-Tab"}),
+    (201, "00:1b:54:aa:bb:cc", "Cisco Systems, Inc", {"dns": "sw-core.office.lan"}),
+]
+
+
+class DemoScanEngine:
+    """Fake discovery for --demo: the same devices appear in any scanned network."""
+
+    duration = 3.2       # discovery time
+    names_delay = 0.9    # name resolution time
+
+    def __init__(self, backend: "DemoBackend"):
+        self.b = backend
+        self._vendors = {mac: vendor for _o, mac, vendor, _n in _DEMO_HOSTS}
+        self._vendors["dc:a6:32:4b:7e:01"] = self._vendors["dc:a6:32:4b:7e:02"] = "Raspberry Pi Trading Ltd"
+        self._names: Dict[str, Dict[str, str]] = {}
+
+    def local_networks(self) -> List[LocalNet]:
+        out = []
+        for st in (self.b.eth_status(), self.b.wifi_status()):
+            if st.address and st.prefix:
+                net = ipaddress.IPv4Network("%s/%d" % (st.address, st.prefix), strict=False)
+                out.append(LocalNet(st.iface, st.address, net, st.mac))
+        return out
+
+    def gateways(self):
+        return {g for g in (self.b.eth.gateway, self.b.wifi.gateway) if g}
+
+    def hostname(self) -> str:
+        return "netpanel-demo"
+
+    def prepare(self) -> None:
+        pass
+
+    def vendor(self, mac: str) -> str:
+        return self._vendors.get(mac, "")
+
+    def discover(self, iface, targets, cancel, on_found, on_progress) -> None:
+        local = next((n for n in self.local_networks() if n.iface == iface), None)
+        if local is None or not targets:
+            return
+        base = int(local.network.network_address)
+        demo = {str(ipaddress.IPv4Address(base + off)): (mac, names) for off, mac, _v, names in _DEMO_HOSTS}
+        steps = 16
+        reported = 0
+        for i in range(1, steps + 1):
+            if cancel.wait(self.duration / steps):
+                return
+            upto = len(targets) * i // steps
+            for ip in targets[reported:upto]:
+                if ip in demo and ip != local.address:
+                    mac, names = demo[ip]
+                    self._names[ip] = names
+                    on_found(ip, mac)
+            reported = upto
+            on_progress(upto)
+
+    def resolve_names(self, hosts, cancel) -> Dict[str, Dict[str, str]]:
+        cancel.wait(self.names_delay)
+        return {ip: dict(self._names.get(ip, {})) for ip, _mac in hosts}
 
 
 class DemoBackend:
@@ -56,6 +132,7 @@ class DemoBackend:
             dns_name="netpanel.demo-tailnet.ts.net", tailnet="demo-tailnet.ts.net",
             online=True, advertised_routes=[], primary_routes=[], ip_forward=True,
         )
+        self.scan = ScanManager(DemoScanEngine(self))
 
     def _sleep(self, factor: float = 1.0):
         time.sleep(self.delay * factor)

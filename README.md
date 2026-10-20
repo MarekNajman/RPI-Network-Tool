@@ -10,15 +10,17 @@ Přehledně ukazuje stav sítě a umožňuje ji nastavit přímo z displeje:
   - *Access Point*: SSID, heslo (WPA2), pásmo 2,4 / 5 GHz, kanál, adresa AP; klienti dostanou IP z DHCP a internet přes eth0 (NAT).
 - **Tailscale** – stav připojení a **Advertise subnet**: předvyplní subnet podle eth0 a po potvrzení provede
   `sudo tailscale set --advertise-routes=<síť>/<prefix>`.
+- **LAN scan** – najde zařízení v přímo připojené síti (rozsah předvyplněný podle eth0, lze změnit) a ukáže tabulku
+  **Název / IP / MAC / Výrobce**; tlačítko **Scan / Stop**. Bez root práv a bez nmap.
 - Vlastní **on-screen klávesnice** (numerická pro IP adresy, QWERTY pro SSID/hesla) – v kiosku žádná systémová klávesnice není.
-- **Přihlášení PINem**: úvodní přehled je vidět bez hesla, každá další obrazovka (Ethernet, Wi-Fi, Tailscale)
+- **Přihlášení PINem**: úvodní přehled je vidět bez hesla, každá další obrazovka (Ethernet, Wi-Fi, Tailscale, LAN scan)
   vyžaduje admin PIN. Tlačítko **Logout** na úvodní obrazovce, **automatické odhlášení po 5 min nečinnosti**
   (30 s předem varování), zámek po 5 špatných pokusech.
 - Běží jako **služba po bootu ve fullscreenu**; z dotykového displeje ji nejde zavřít ani minimalizovat.
 
 GUI je v angličtině, tato dokumentace v češtině.
 
-![Home](docs/screenshots/19-home-after.png)
+![Home](docs/screenshots/23-home-logged-in.png)
 
 | Ethernet (DHCP) | Wi-Fi – Station | Wi-Fi – Access Point |
 |---|---|---|
@@ -27,6 +29,8 @@ GUI je v angličtině, tato dokumentace v češtině.
 | ![](docs/screenshots/04-keypad-ip.png) | ![](docs/screenshots/09-keyboard-text.png) | ![](docs/screenshots/18-tailscale-advertised.png) |
 | **Login (PIN)** | **Přihlášeno – Logout + odpočet** | **Varování před auto-logoutem** |
 | ![](docs/screenshots/21-login.png) | ![](docs/screenshots/23-home-logged-in.png) | ![](docs/screenshots/24-idle-warning.png) |
+| **LAN scan – výsledky** | **LAN scan – detail zařízení** | **LAN scan – rozsah mimo lokální síť** |
+| ![](docs/screenshots/28-scan-results.png) | ![](docs/screenshots/30-scan-detail.png) | ![](docs/screenshots/33-scan-not-local.png) |
 
 Všechny obrazovky jsou v [`docs/screenshots/`](docs/screenshots/) (vygenerované v demo režimu, 800 × 480).
 
@@ -48,14 +52,15 @@ Všechny obrazovky jsou v [`docs/screenshots/`](docs/screenshots/) (vygenerovan�
 5. [Co přesně dělá instalátor](#co-přesně-dělá-instalátor)
 6. [Kiosk: služba po bootu, fullscreen, nejde zavřít](#kiosk-služba-po-bootu-fullscreen-nejde-zavřít)
 7. [Ovládání GUI](#ovládání-gui)
-8. [Přihlášení: admin PIN a automatické odhlášení](#přihlášení-admin-pin-a-automatické-odhlášení)
-9. [Bezpečnost a oprávnění](#bezpečnost-a-oprávnění)
-10. [Konfigurace](#konfigurace)
-11. [Vývoj a testy na PC (demo režim)](#vývoj-a-testy-na-pc-demo-režim)
-12. [Řešení problémů](#řešení-problémů)
-13. [Známá omezení a kritické poznámky](#známá-omezení-a-kritické-poznámky)
-14. [Aktualizace a odinstalace](#aktualizace-a-odinstalace)
-15. [Licence a zdroje](#licence-a-zdroje)
+8. [LAN scan: jak funguje a co od něj čekat](#lan-scan-jak-funguje-a-co-od-něj-čekat)
+9. [Přihlášení: admin PIN a automatické odhlášení](#přihlášení-admin-pin-a-automatické-odhlášení)
+10. [Bezpečnost a oprávnění](#bezpečnost-a-oprávnění)
+11. [Konfigurace](#konfigurace)
+12. [Vývoj a testy na PC (demo režim)](#vývoj-a-testy-na-pc-demo-režim)
+13. [Řešení problémů](#řešení-problémů)
+14. [Známá omezení a kritické poznámky](#známá-omezení-a-kritické-poznámky)
+15. [Aktualizace a odinstalace](#aktualizace-a-odinstalace)
+16. [Licence a zdroje](#licence-a-zdroje)
 
 ---
 
@@ -73,6 +78,7 @@ Všechny obrazovky jsou v [`docs/screenshots/`](docs/screenshots/) (vygenerovan�
  │          python3 -m netpanel   ── jen standardní knihovna Pythonu     │
  │           ├─ nmcli ──────────▶ NetworkManager (povoleno polkit pravidlem)
  │           ├─ tailscale status ▶ tailscaled (čtení bez root)           │
+ │           ├─ UDP → ARP, ip -j neigh ▶ LAN scan (bez root)             │
  │           └─ sudo netpanel-ts-routes ▶ tailscale set --advertise-routes
  └───────────────────────────────────────────────────────────────────────┘
 ```
@@ -104,6 +110,7 @@ RPI-5inchLCD-Net/
 │       ├── network.py            NetworkManager přes nmcli (eth, Wi-Fi AP/Station, scan, rollback)
 │       ├── nmparse.py            parser výstupu `nmcli -t`
 │       ├── tailscale.py          tailscale status + advertise routes
+│       ├── lanscan.py            LAN scan: ARP discovery, výrobce podle MAC, názvy (mDNS/NetBIOS/DNS); CLI pro SSH
 │       ├── system.py             hostname, teplota CPU
 │       ├── runner.py             spouštění příkazů (timeouty, logování, maskování hesel)
 │       └── demo.py               simulovaný backend pro vývoj na PC
@@ -156,6 +163,7 @@ RPI-5inchLCD-Net/
 | `cage` | Wayland kiosk kompozitor |
 | `chromium-browser` (resp. `chromium`) | zobrazení UI |
 | `iw` | regulatorní doména Wi-Fi, počet klientů AP |
+| `iproute2` (`ip`), `ieee-data` | LAN scan: tabulka sousedů (ARP) a databáze výrobců podle MAC (IEEE OUI) |
 | `fonts-dejavu-core` | záložní font |
 | `tailscale` | instaluje se zvlášť, viz krok 5 |
 
@@ -495,7 +503,7 @@ journalctl -b -u netpanel -u polkit -u NetworkManager --no-pager | tail -n 80
 
 | Krok | Soubor / akce |
 |---|---|
-| Balíčky | `apt install python3 iw network-manager dnsmasq-base polkitd nftables sudo cage fonts-dejavu-core chromium-browser` |
+| Balíčky | `apt install python3 iw network-manager dnsmasq-base polkitd nftables sudo iproute2 ieee-data cage fonts-dejavu-core chromium-browser` |
 | Uživatel | `netpanel` (domov `/var/lib/netpanel`, bez hesla, shell `nologin`), skupiny `video render input netdev` |
 | Aplikace | `/opt/netpanel` (vlastník root, uživatel netpanel jen čte) |
 | Tailscale helper | `/usr/local/sbin/netpanel-ts-routes` (root, 0755) |
@@ -541,7 +549,8 @@ sudo systemctl set-default graphical.target && sudo reboot
 ## Ovládání GUI
 
 **Home** – dvě dlaždice nahoře (Ethernet, Wi-Fi) s aktuálním stavem, IP a bránou/SSID; dole sekce Tailscale
-s IP v tailnetu, advertised routou (APPROVED / PENDING) a velkým tlačítkem **Advertise subnet**.
+s IP v tailnetu, advertised routou (APPROVED / PENDING) a velkým tlačítkem **Advertise subnet**, vpravo dole
+dlaždice **LAN scan**.
 Stav se obnovuje každé 4 s. Vpravo nahoře teplota CPU a čas.
 
 **Ethernet** – vlevo stav linky (rychlost, MAC, profil, DNS), vpravo přepínač **DHCP / Static IP**.
@@ -569,6 +578,14 @@ hostitelské bity se vynulují automaticky – Tailscale by jinak příkaz odmí
 
 > `--advertise-routes` **nahrazuje** celý seznam advertised rout – dialog na to upozorní, pokud už nějaká jiná routa existuje.
 
+**LAN scan** – nahoře **síť / prefix** (předvyplněno podle eth0, např. `192.168.10.0 / 24`; po skenu zůstane
+naposledy skenovaný rozsah), stav skenu a tlačítko **Scan** (během skenu **Stop**). Dole tabulka
+**Name · IP · MAC · Vendor**, řádky přibývají průběžně, seřazené podle IP; posouvá se tažením prstu.
+Štítek **GW** = výchozí brána, **THIS** = samotný panel. Klepnutí na řádek otevře detail (celý název výrobce,
+všechny nalezené názvy a jejich zdroj). Když rozsah není v přímo připojené síti nebo je větší než /22,
+zobrazí se důvod a tlačítka se sítěmi, které skenovat jde (např. `eth0 · 192.168.10.0/24`, `wlan0 · 10.42.0.0/24`).
+Detaily viz [LAN scan](#lan-scan-jak-funguje-a-co-od-něj-čekat).
+
 Spuštěné příkazy (pro kontrolu v `journalctl -u netpanel`), např.:
 
 ```text
@@ -579,6 +596,61 @@ sudo -n /usr/local/sbin/netpanel-ts-routes 192.168.10.0/24   →   tailscale set
 ```
 
 Hesla se v logu maskují (`******`).
+
+## LAN scan: jak funguje a co od něj čekat
+
+### Jak to funguje (bez root práv, bez nmap)
+
+1. **Hledání zařízení (ARP).** Na každou adresu v rozsahu se pošle jeden prázdný UDP datagram. Aby ho jádro mohlo
+   doručit, musí nejdřív zjistit MAC adresu cíle – zeptá se ARP („kdo má 192.168.10.23?“). **Na ARP musí odpovědět
+   každé IPv4 zařízení v segmentu**, i počítač s firewallem, který zahazuje ping. Odpovědi jádro uloží do tabulky
+   sousedů, NetPanel ji čte příkazem `ip -j -4 neigh show dev eth0`. Záznamy starší než pár sekund (`STALE`)
+   si jádro samo ověří znovu, proto sken /24 trvá cca **3–10 s**. Rozsah se zkouší po 256 adresách.
+2. **MAC** – přímo z ARP odpovědi.
+3. **Výrobce** – prvních 24/28/36 bitů MAC (OUI) se dohledá v registru IEEE (balíček `ieee-data`,
+   soubory `/usr/share/ieee-data/*.csv`). Název se zkrátí o „Ltd / Inc / GmbH …“, celý je v detailu.
+4. **Název** – zkouší se paralelně (max. ~2,5 s) a vezme se první nalezený v tomto pořadí:
+
+   | Zdroj | Kdo ho typicky má |
+   |---|---|
+   | DHCP lease vlastního AP (`/var/lib/NetworkManager/dnsmasq-*.leases`) | klienti připojení k Wi-Fi AP panelu |
+   | mDNS (dotaz na UDP 5353 zařízení) | Apple, Linux s avahi (Raspberry Pi), tiskárny, NAS |
+   | NetBIOS (UDP 137) | Windows s povoleným NetBIOS, Samba, NAS |
+   | Reverzní DNS (PTR) | sítě, kde DHCP/DNS server registruje názvy (firemní DNS, většina routerů) |
+
+   Generické PTR názvy, které jen opakují IP (`192-168-10-23.isp.net`), se ignorují.
+
+Rozsah je omezený na **přímo připojené sítě** (eth0, wlan0 – i síť vlastního AP) a **max. /22 (1024 adres)**.
+Za routerem ARP neexistuje, takže MAC ani výrobce by tam nešly zjistit.
+
+### Co od toho (ne)čekat
+
+| Sloupec | Realita |
+|---|---|
+| **IP / MAC** | Spolehlivé pro všechna zařízení, která jsou v tu chvíli zapnutá a v síti. Uspané telefony a notebooky nemusí odpovědět. |
+| **Výrobce** | Výrobce **síťové karty**, ne zařízení (PC s Intel Wi-Fi = „Intel“). Telefony s „privátní Wi-Fi adresou“ (iOS/Android) a virtuální stroje mají **lokálně spravovanou (náhodnou) MAC** → „Private MAC“, výrobce zjistit nejde. |
+| **Název** | **Často prázdný** – v síti neexistuje univerzální „název zařízení“. IoT, PLC, kamery a telefony obvykle nic neohlásí. Kolik bude vyplněných, záleží na síti (odhad, neměřeno: třetina až dvě třetiny). |
+
+Další omezení: **Wi-Fi s izolací klientů** (hostovské/firemní sítě) ostatní klienty vůbec neukáže; přepínač s
+**port security / NAC** může sken vyhodnotit jako podezřelý.
+
+### Bezpečnost
+
+- Výsledek skenu (IP + MAC + názvy = **inventura sítě**) je **bezpečnostně citlivá informace**. Je jen za PINem,
+  drží se jen v paměti služby (do restartu nebo dalšího skenu) a na úvodní obrazovce se nezobrazuje.
+- **Ve firemní síti sken spouštěj jen se souhlasem správce sítě / IT.** I ARP sken celé podsítě může spustit
+  alarm IDS/NAC a může být v rozporu s interní bezpečnostní politikou.
+- Sken neposílá nic mimo zvolený rozsah a nepotřebuje žádná další oprávnění (žádný root, žádné `CAP_NET_RAW`).
+
+### Ladění přes SSH
+
+Stejný kód jako panel, výstup jako tabulka v terminálu:
+
+```bash
+cd /opt/netpanel && sudo -u netpanel python3 -m netpanel.backend.lanscan                 # síť eth0
+cd /opt/netpanel && sudo -u netpanel python3 -m netpanel.backend.lanscan 192.168.10.0/24 # zadaný rozsah
+ip -4 neigh show dev eth0          # co jádro ví o sousedech (REACHABLE = odpověděl)
+```
 
 ## Přihlášení: admin PIN a automatické odhlášení
 
@@ -707,13 +779,17 @@ python3 tools/screenshots.py                    # průchod UI + screenshoty (vy�
 | Zapomenutý PIN | Přes SSH nastav nový: `sudo netpanel-passwd`. |
 | Odhlašuje to během práce | Auto-logout po 5 min bez dotyku; delší čas: `NETPANEL_IDLE_TIMEOUT` v `/etc/default/netpanel`. |
 | `install.sh`: „/bin/bash^M: bad interpreter“ | Soubory byly uloženy s Windows konci řádků (CRLF). Oprava na Pi: `sed -i 's/\r$//' deploy/*.sh deploy/*.py deploy/netpanel-ts-routes deploy/netpanel-passwd deploy/*.service deploy/*.conf deploy/netpanel.*` |
+| LAN scan: všude „Unknown“ ve sloupci Vendor | Chybí databáze výrobců: `sudo apt install ieee-data` (stav ukáže i řádek pod výsledkem). |
+| LAN scan: „not inside a directly connected network“ | Rozsah musí ležet v síti eth0/wlan0 (viz tlačítka pod hláškou). Sítě za routerem skenovat nejde – záměrně. |
+| LAN scan najde jen bránu / skoro nic přes Wi-Fi | Wi-Fi síť má izolaci klientů – ARP na ostatní klienty neprojde. Skenuj přes eth0. |
+| LAN scan: prázdné názvy | Normální, viz [Co od toho čekat](#co-od-toho-nečekat). Kontrola z SSH: `sudo -u netpanel python3 -m netpanel.backend.lanscan`. |
 | Po změně IP na eth0 jsem ztratil SSH | Očekávané – SSH běželo přes starou adresu. Připoj se na novou IP (je vidět na displeji). |
 
 ## Známá omezení a kritické poznámky
 
 Tohle je poctivý seznam slabin – rozhodni, co z toho je pro tvoje nasazení problém:
 
-1. **Neotestováno na reálném HW.** Testováno: unit testy (56), parsování výstupu `nmcli`, generované příkazy,
+1. **Neotestováno na reálném HW.** Testováno: unit testy (93), parsování výstupu `nmcli`, generované příkazy,
    rollback, HTTP API včetně přihlášení, celé UI v Chromiu 800 × 480 s demo backendem (login, špatný PIN,
    varování a auto-logout, odhlášení se zavřením otevřené klávesnice); backend prošel nezávislou revizí.
    Výstup `nmcli` se čte s `--escape no` – formát se mezi verzemi NetworkManageru může mírně lišit. Neověřeno: chování na Pi 4 s tímto
@@ -744,6 +820,10 @@ Tohle je poctivý seznam slabin – rozhodni, co z toho je pro tvoje nasazení p
     Skutečné povolení kanálu ověřuje až ovladač – když AP nenaběhne, zkus jiný kanál.
 14. **`tailscale debug prefs`** (čtení advertised rout) je skrytý ladicí příkaz Tailscale; jeho formát se může
     v budoucích verzích změnit. Exit-node routy (`0.0.0.0/0`, `::/0`) NetPanel v seznamu nezobrazuje.
+15. **LAN scan** – jen přímo připojené sítě, max. /22, jen IPv4. Sloupec Název je best-effort (viz výše).
+    Mechanismus „UDP → ARP → tabulka sousedů“ je ověřený na reálném Linuxovém jádře, **celý sken na Pi
+    v reálné síti zatím ne** – první sken porovnej s tím, co víš o síti (nebo s `arp-scan`, pokud ho máš).
+    Výsledky se neukládají na disk; po restartu služby jsou pryč.
 
 ## Aktualizace a odinstalace
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 
 @dataclass
@@ -155,6 +155,24 @@ class TailscaleStatus:
     primary_routes: List[str] = field(default_factory=list)  # approved & served by this node
     ip_forward: Optional[bool] = None  # net.ipv4.ip_forward (required for subnet routing)
     error: str = ""
+
+
+@dataclass
+class ScanHost:
+    """One device found by the LAN scan."""
+
+    ip: str
+    mac: str = ""
+    vendor: str = ""          # shortened organisation name ("Raspberry Pi Trading")
+    vendor_full: str = ""     # as registered at the IEEE
+    random_mac: bool = False  # locally administered ("private") MAC - no vendor exists
+    name: str = ""
+    name_source: str = ""     # dhcp / mdns / netbios / dns / this device
+    names: Dict[str, str] = field(default_factory=dict)  # every name found, by source
+    tags: List[str] = field(default_factory=list)        # "self", "gateway"
+
+    def to_json(self) -> dict:
+        return asdict(self)
 
 
 def to_json(obj):

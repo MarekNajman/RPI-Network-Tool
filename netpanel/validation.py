@@ -326,3 +326,37 @@ def validate_routes(routes: Iterable[str]) -> List[str]:
         if canon not in out:
             out.append(canon)
     return out
+
+
+# --------------------------------------------------------------------------- LAN scan
+
+
+def validate_scan_range(network: str, prefix, local_nets, max_addresses: int = 1024):
+    """Range for the LAN scan -> (IPv4Network, LocalNet it belongs to).
+
+    Only directly connected networks: behind a router there is no ARP, hence no
+    MAC address and no vendor.
+    """
+    errors: Errors = {}
+    ip = p = None
+    try:
+        ip = parse_ipv4(str(network or ""))
+    except ValueError as e:
+        errors["network"] = str(e)
+    try:
+        p = parse_prefix(prefix)
+    except ValueError as e:
+        errors["prefix"] = str(e)
+    if errors:
+        raise ValidationError(errors, next(iter(errors.values())))
+    net = network_of(str(ip), p)
+    if net.num_addresses > max_addresses:
+        biggest = 32 - (max_addresses.bit_length() - 1)
+        msg = "/%d has %d addresses - the maximum is /%d (%d addresses)." % (p, net.num_addresses, biggest, max_addresses)
+        raise ValidationError({"prefix": msg}, msg)
+    for local in local_nets:
+        if net.subnet_of(local.network):
+            return net, local
+    have = ", ".join("%s %s" % (n.iface, n.network) for n in local_nets) or "none"
+    msg = "%s is not inside a directly connected network (%s)." % (net, have)
+    raise ValidationError({"network": msg}, msg)

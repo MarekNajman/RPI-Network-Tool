@@ -27,6 +27,7 @@ from urllib.parse import urlsplit
 
 from . import __version__
 from .auth import AuthError, AuthManager
+from .backend.lanscan import ScanBusy, suggest_range
 from .backend.network import eth_network
 from .backend.runner import CommandError
 from .models import APConfig, IPv4Config, StationRequest, to_json
@@ -36,6 +37,7 @@ from .validation import (
     validate_ap,
     validate_ipv4_config,
     validate_routes,
+    validate_scan_range,
     validate_station,
 )
 
@@ -212,6 +214,38 @@ class Api:
         result = self._write(self.b.ts_set_routes, routes)
         return 200, dict(ok=True, routes=routes, **result)
 
+    # ------------------------------------------------------------- LAN scan
+
+    def scan_get(self, _body=None, _token=None):
+        nets, err = [], None
+        try:
+            nets = self.b.scan.local_networks()
+        except CommandError as e:
+            err = e.message
+        eth = None
+        try:
+            eth = self._cached("eth", 1.5, self.b.eth_status)
+        except CommandError:
+            pass
+        suggested = suggest_range(eth_network(eth) if eth else None, eth.iface if eth else "eth0", nets)
+        return 200, {"ok": True, "scan": self.b.scan.snapshot(), "networks": [n.to_json() for n in nets],
+                     "suggested": suggested, "error": err}
+
+    def scan_status(self, _body=None, _token=None):
+        """Lightweight: polled by the UI while a scan runs."""
+        return 200, {"ok": True, "scan": self.b.scan.snapshot()}
+
+    def scan_start(self, body, _token=None):
+        net, local = validate_scan_range(body.get("network", ""), body.get("prefix", ""), self.b.scan.local_networks())
+        try:
+            snap = self.b.scan.start(net, local)
+        except ScanBusy:
+            return 409, {"ok": False, "message": "A scan is already running - stop it first."}
+        return 200, {"ok": True, "scan": snap}
+
+    def scan_stop(self, _body, _token=None):
+        return 200, {"ok": True, "scan": self.b.scan.stop()}
+
 
 ROUTES_GET = {
     "/api/health": "health",
@@ -220,6 +254,8 @@ ROUTES_GET = {
     "/api/eth": "eth_get",
     "/api/wifi": "wifi_get",
     "/api/tailscale": "ts_get",
+    "/api/scan": "scan_get",
+    "/api/scan/status": "scan_status",
 }
 ROUTES_POST = {
     "/api/eth": "eth_post",
@@ -229,6 +265,8 @@ ROUTES_POST = {
     "/api/wifi/ap/stop": "wifi_ap_stop",
     "/api/wifi/station": "wifi_station",
     "/api/tailscale/routes": "ts_routes",
+    "/api/scan/start": "scan_start",
+    "/api/scan/stop": "scan_stop",
     "/api/auth/login": "auth_login",
     "/api/auth/logout": "auth_logout",
     "/api/auth/ping": "auth_ping",
