@@ -1,4 +1,4 @@
-# NetPanel – dotykové síťové GUI pro Raspberry Pi 4 + Waveshare 5" DSI LCD
+# NetPanel – Network tool pro Raspberry Pi 4 + Waveshare 5" DSI LCD
 
 NetPanel je jednoduchá kiosková aplikace pro **Raspberry Pi 4** s dotykovým displejem
 **Waveshare 5inch DSI LCD (800 × 480, kapacitní dotyk)** a **Raspberry Pi OS 12 „Bookworm“**.
@@ -21,7 +21,7 @@ Přehledně ukazuje stav sítě a umožňuje ji nastavit přímo z displeje:
   (30 s předem varování), zámek po 5 špatných pokusech.
 - Běží jako **služba po bootu ve fullscreenu**; z dotykového displeje ji nejde zavřít ani minimalizovat.
 
-GUI je v angličtině, tato dokumentace v češtině.
+
 
 ![Home](docs/screenshots/23-home-logged-in.png)
 
