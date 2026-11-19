@@ -23,7 +23,10 @@ class Backend:
         # Imported here, not at module level: `python3 -m netpanel.backend.lanscan`
         # (the SSH debug CLI) must not find the module already imported by the package.
         from .lanscan import LanScanner, ScanManager
-        self.scan = ScanManager(LanScanner())  # LAN scan jobs (see lanscan.py)
+        from .cameras import CameraFinder, CameraManager
+        lan = LanScanner()
+        self.scan = ScanManager(lan)                       # LAN scan jobs (see lanscan.py)
+        self.cams = CameraManager(CameraFinder(lan))       # camera search (see cameras.py)
 
     def system(self) -> dict:
         return {"hostname": system.hostname(), "cpu_temp": system.cpu_temp(), "uptime": system.uptime_s(), "demo": False}

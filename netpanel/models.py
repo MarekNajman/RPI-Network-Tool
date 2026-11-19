@@ -175,6 +175,39 @@ class ScanHost:
         return asdict(self)
 
 
+@dataclass
+class Camera:
+    """One camera / NVR found by the camera search (Milesight protocol and/or ONVIF)."""
+
+    ip: str
+    mac: str = ""
+    kind: str = ""              # IPC / NVR (Milesight) or ONVIF
+    vendor: str = ""            # "Milesight" or from the MAC (IEEE OUI)
+    model: str = ""
+    oem_model: str = ""
+    name: str = ""              # DeviceName (Milesight) / ONVIF name scope
+    firmware: str = ""
+    hardware: str = ""
+    serial: str = ""
+    netmask: str = ""
+    gateway: str = ""
+    dns: str = ""
+    http_port: int = 0
+    https_port: int = 0
+    http_enabled: Optional[bool] = None
+    https_enabled: Optional[bool] = None
+    activated: Optional[bool] = None   # Milesight: False = not activated yet (no password set)
+    uptime: str = ""            # "Runtime" as reported by the camera
+    onvif_url: str = ""
+    sources: List[str] = field(default_factory=list)  # "milesight", "onvif"
+    iface: str = ""
+    in_subnet: bool = True      # camera address inside the searched interface's network
+    can_modify: bool = False    # IP can be changed (Milesight protocol)
+
+    def to_json(self) -> dict:
+        return asdict(self)
+
+
 def to_json(obj):
     """Convert dataclasses (possibly nested in lists/dicts) into JSON-ready data."""
     if hasattr(obj, "__dataclass_fields__"):

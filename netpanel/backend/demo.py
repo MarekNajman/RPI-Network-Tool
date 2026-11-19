@@ -12,8 +12,9 @@ import threading
 import time
 from typing import Dict, List
 
-from ..models import APConfig, EthStatus, IPv4Config, StationRequest, TailscaleStatus, WifiNetwork, WifiStatus
+from ..models import APConfig, Camera, EthStatus, IPv4Config, StationRequest, TailscaleStatus, WifiNetwork, WifiStatus
 from ..validation import netmask_from_prefix
+from .cameras import CameraError, CameraManager
 from .lanscan import LocalNet, ScanManager
 from .nmparse import classify_security
 from .runner import CommandError
@@ -104,6 +105,75 @@ class DemoScanEngine:
         return {ip: dict(self._names.get(ip, {})) for ip, _mac in hosts}
 
 
+# Camera search demo: (offset in the interface network or absolute IP, Camera fields)
+_DEMO_CAMS = [
+    (64, dict(mac="1c:c3:16:2a:10:64", kind="IPC", vendor="Milesight", model="MS-C5376-FPB", name="Gate - entrance",
+              firmware="51.7.0.77-r9", hardware="V1.0", serial="6418C2A1F7B9", http_port=80, https_port=443,
+              http_enabled=True, https_enabled=True, activated=True, uptime="12 days",
+              sources=["milesight", "onvif"], onvif_url="http://{ip}/onvif/device_service", can_modify=True)),
+    (65, dict(mac="1c:c3:16:2a:10:65", kind="IPC", vendor="Milesight", model="MS-C8165-PB", name="Hall fisheye",
+              firmware="45.8.0.3", hardware="V2.0", serial="6418C2A1F7C0", http_port=80, https_port=443,
+              http_enabled=True, https_enabled=False, activated=True, uptime="3 days",
+              sources=["milesight"], can_modify=True)),
+    (20, dict(mac="1c:c3:16:7e:00:20", kind="NVR", vendor="Milesight", model="MS-N5016-UPT", name="NVR office",
+              firmware="73.9.0.6", http_port=80, https_port=443, activated=True, uptime="41 days",
+              sources=["milesight"], can_modify=True)),
+    (71, dict(mac="c0:56:e3:01:02:71", kind="ONVIF", vendor="Hikvision", model="DS-2CD2143G2-I", name="Yard",
+              http_port=80, sources=["onvif"], onvif_url="http://{ip}/onvif/device_service")),
+    ("192.168.5.190", dict(mac="1c:c3:16:3b:51:90", kind="IPC", vendor="Milesight", model="MS-C2964-RFLPE",
+                           firmware="51.7.0.75", hardware="V1.0", serial="6418C2B0A190", http_port=80, https_port=443,
+                           http_enabled=True, https_enabled=True, activated=False, netmask="255.255.255.0",
+                           gateway="192.168.5.1", dns="8.8.8.8", sources=["milesight"], can_modify=True)),
+]
+
+
+class DemoCameraFinder:
+    """Fake camera search for --demo. IP changes are remembered until the service restarts."""
+
+    duration = 2.6
+
+    def __init__(self, backend: "DemoBackend"):
+        self.b = backend
+        self._moved: Dict[str, dict] = {}   # mac -> {"ip","netmask","gateway","dns","http_port"}
+
+    def local_networks(self) -> List[LocalNet]:
+        return DemoScanEngine(self.b).local_networks()
+
+    def _cams(self, local: LocalNet) -> List[Camera]:
+        out = []
+        base = int(local.network.network_address)
+        for where, f in _DEMO_CAMS:
+            ip = where if isinstance(where, str) else str(ipaddress.IPv4Address(base + where))
+            cam = Camera(ip=ip, iface=local.iface, **copy.deepcopy(f))
+            if not cam.netmask and "milesight" in cam.sources:   # ONVIF discovery reports no IP settings
+                cam.netmask, cam.gateway, cam.dns = str(local.network.netmask), self.b.eth.gateway, "8.8.8.8"
+            moved = self._moved.get(cam.mac)
+            if moved:
+                cam.ip, cam.netmask, cam.gateway, cam.dns = moved["ip"], moved["netmask"], moved["gateway"], moved["dns"]
+                cam.http_port = moved["http_port"]
+            cam.onvif_url = cam.onvif_url.replace("{ip}", cam.ip)
+            out.append(cam)
+        return out
+
+    def discover(self, local: LocalNet, cancel, on_found, duration: float = 4.0) -> None:
+        cams = self._cams(local)
+        for cam in cams:
+            if cancel.wait(self.duration / len(cams)):
+                return
+            on_found(cam)
+
+    def fill_macs(self, local: LocalNet, cams) -> None:
+        pass
+
+    def modify(self, local: LocalNet, cam: Camera, cfg: dict, username: str, password: str) -> str:
+        time.sleep(self.b.delay * 1.5)
+        if password == "wrong":
+            raise CameraError("The camera refused the change - check the user name and password.")
+        self._moved[cam.mac] = {"ip": cfg["address"], "netmask": cfg["netmask"], "gateway": cfg["gateway"],
+                                "dns": cfg.get("dns") or cam.dns, "http_port": cfg["http_port"]}
+        return "Camera %s: new address %s requested. It may take a few seconds to apply." % (cam.model, cfg["address"])
+
+
 class DemoBackend:
     demo = True
 
@@ -133,6 +203,7 @@ class DemoBackend:
             online=True, advertised_routes=[], primary_routes=[], ip_forward=True,
         )
         self.scan = ScanManager(DemoScanEngine(self))
+        self.cams = CameraManager(DemoCameraFinder(self))
 
     def _sleep(self, factor: float = 1.0):
         time.sleep(self.delay * factor)

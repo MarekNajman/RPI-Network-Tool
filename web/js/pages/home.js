@@ -1,4 +1,4 @@
-// Home: Ethernet + Wi-Fi tiles on top, Tailscale section + LAN scan tile below.
+// Home: Ethernet + Wi-Fi tiles on top, Tailscale section + LAN scan / Cameras tiles below.
 
 import { h, icon, setText, setPill, cidr } from '../dom.js';
 import { session } from '../session.js';
@@ -58,12 +58,20 @@ export function createHome(app) {
   const advSub = advBtn.querySelector('.s');
   const tsCard = h('section', { class: 'ts-card' }, tsInfo, advBtn);
 
-  // LAN scan tile
-  const scanSub = h('div', { class: 'tile-sub' }, 'Find devices');
-  const scanGo = h('span', { class: 'go' }, icon('chevron'));
-  const scanTile = h('button', { class: 'scan-tile', type: 'button', onclick: () => app.go('scan') },
-    h('div', { class: 'scan-tile-top' }, h('span', { class: 'ibox' }, icon('radar')), scanGo),
-    h('div', { class: 'tile-name' }, 'LAN scan'), scanSub);
+  // LAN scan + Cameras: two compact tiles stacked in the right column
+  function miniTile(cls, iconName, name, subText, page) {
+    const sub = h('div', { class: 'tile-sub' }, subText);
+    const go = h('span', { class: 'go' }, icon('chevron'));
+    const el = h('button', { class: `scan-tile mini ${cls}`, type: 'button', onclick: () => app.go(page) },
+      h('span', { class: 'ibox' }, icon(iconName)),
+      h('div', { class: 'mini-txt' }, h('div', { class: 'tile-name' }, name), sub), go);
+    return { el, sub, go, subText };
+  }
+  const scanT = miniTile('', 'radar', 'LAN scan', 'Find devices', 'scan');
+  const camT = miniTile('cam', 'camera', 'Cameras', 'Find cameras', 'cams');
+  const scanGo = scanT.go;
+  const scanSub = scanT.sub;
+  const scanTile = h('div', { class: 'mini-col' }, scanT.el, camT.el);
 
   const el = h('section', { class: 'page', id: 'page-home' },
     top, h('main', { class: 'home' },
@@ -117,9 +125,10 @@ export function createHome(app) {
       sessBtn.classList.toggle('on', inn);
       sessIcon.replaceChildren(icon(inn ? 'unlock' : 'lock'));
       setText(sessLabel, inn ? 'Logout' : 'Login');
-      for (const go of [eth.go, wifi.go, scanGo]) go.replaceChildren(icon(inn ? 'chevron' : 'lock'));
+      for (const go of [eth.go, wifi.go, scanGo, camT.go]) go.replaceChildren(icon(inn ? 'chevron' : 'lock'));
       setText(advSub, inn ? 'Share LAN via Tailscale' : 'PIN required');
-      setText(scanSub, inn ? 'Find devices' : 'PIN required');
+      setText(scanSub, inn ? scanT.subText : 'PIN required');
+      setText(camT.sub, inn ? camT.subText : 'PIN required');
     }
     if (inn) {
       const s = Math.max(0, Math.ceil(session.remainingMs() / 1000));

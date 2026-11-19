@@ -27,6 +27,7 @@ from urllib.parse import urlsplit
 
 from . import __version__
 from .auth import AuthError, AuthManager
+from .backend.cameras import CameraError
 from .backend.lanscan import ScanBusy, suggest_range
 from .backend.network import eth_network
 from .backend.runner import CommandError
@@ -35,6 +36,8 @@ from .validation import (
     ValidationError,
     canonical_route,
     validate_ap,
+    validate_cam_iface,
+    validate_camera_ip,
     validate_ipv4_config,
     validate_routes,
     validate_scan_range,
@@ -246,6 +249,48 @@ class Api:
     def scan_stop(self, _body, _token=None):
         return 200, {"ok": True, "scan": self.b.scan.stop()}
 
+    # ------------------------------------------------------------- camera search
+
+    def cams_get(self, _body=None, _token=None):
+        nets, err = [], None
+        try:
+            nets = self.b.cams.local_networks()
+        except CommandError as e:
+            err = e.message
+        eth_iface = "eth0"
+        try:
+            eth_iface = self._cached("eth", 1.5, self.b.eth_status).iface or eth_iface
+        except CommandError:
+            pass
+        names = [n.iface for n in nets]
+        suggested = eth_iface if eth_iface in names else (names[0] if names else "")
+        return 200, {"ok": True, "cams": self.b.cams.snapshot(), "networks": [n.to_json() for n in nets],
+                     "suggested": suggested, "error": err}
+
+    def cams_status(self, _body=None, _token=None):
+        """Lightweight: polled by the UI while a search runs."""
+        return 200, {"ok": True, "cams": self.b.cams.snapshot()}
+
+    def cams_start(self, body, _token=None):
+        local = validate_cam_iface(body.get("iface"), self.b.cams.local_networks())
+        try:
+            snap = self.b.cams.start(local)
+        except ScanBusy:
+            return 409, {"ok": False, "message": "A camera search or IP change is already running."}
+        return 200, {"ok": True, "cams": snap}
+
+    def cams_stop(self, _body, _token=None):
+        return 200, {"ok": True, "cams": self.b.cams.stop()}
+
+    def cams_ip(self, body, _token=None):
+        cfg = validate_camera_ip(body)
+        local = validate_cam_iface(body.get("iface"), self.b.cams.local_networks())
+        try:
+            msg = self._write(self.b.cams.modify, cfg["mac"], local, cfg, cfg["username"], cfg["password"])
+        except CameraError as e:
+            return 502, {"ok": False, "message": e.message}
+        return 200, {"ok": True, "message": msg}
+
 
 ROUTES_GET = {
     "/api/health": "health",
@@ -256,6 +301,8 @@ ROUTES_GET = {
     "/api/tailscale": "ts_get",
     "/api/scan": "scan_get",
     "/api/scan/status": "scan_status",
+    "/api/cams": "cams_get",
+    "/api/cams/status": "cams_status",
 }
 ROUTES_POST = {
     "/api/eth": "eth_post",
@@ -267,6 +314,9 @@ ROUTES_POST = {
     "/api/tailscale/routes": "ts_routes",
     "/api/scan/start": "scan_start",
     "/api/scan/stop": "scan_stop",
+    "/api/cams/start": "cams_start",
+    "/api/cams/stop": "cams_stop",
+    "/api/cams/ip": "cams_ip",
     "/api/auth/login": "auth_login",
     "/api/auth/logout": "auth_logout",
     "/api/auth/ping": "auth_ping",

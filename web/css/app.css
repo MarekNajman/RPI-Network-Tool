@@ -22,6 +22,7 @@
   --wifi: #14b8a6;
   --ts: #8b5cf6;
   --scan: #f97316;        /* LAN scan */
+  --cam: #ec4899;         /* Cameras */
   --ok: #22c55e;
   --warn: #f59e0b;
   --err: #ef4444;
@@ -152,7 +153,7 @@ button:focus { outline: none; }
 .tile-sub { font-size: 15px; color: var(--dim); margin-top: 3px; font-weight: 500; }
 .tile-head .go { margin-left: auto; color: var(--dim-2); width: 22px; height: 22px; }
 
-.home-bottom { display: grid; grid-template-columns: 1fr 176px; gap: 12px; min-height: 0; }
+.home-bottom { display: grid; grid-template-columns: 1fr 200px; gap: 12px; min-height: 0; }
 .ts-card {
   display: grid; grid-template-columns: 1fr 178px; gap: 16px; padding: 14px 16px; min-height: 0;
   border-radius: 18px; border: 1px solid var(--border);
@@ -466,3 +467,57 @@ button:focus { outline: none; }
 .scan-results .empty.bad b { color: #fca5a5; }
 .scan-results .empty > span:not(.i) { max-width: 560px; }
 .modal-head .i.i-radar { color: var(--scan); }
+
+/* ------------------------------------------------------------------ cameras */
+/* home: LAN scan + Cameras as two compact tiles stacked in the right column */
+.mini-col { display: grid; grid-template-rows: 1fr 1fr; gap: 12px; min-height: 0; min-width: 0; }
+.scan-tile.mini { flex-direction: row; align-items: center; gap: 10px; padding: 10px 10px 10px 12px; }
+.scan-tile.mini .ibox { width: 44px; height: 44px; border-radius: 13px; }
+.scan-tile.mini .ibox .i { width: 28px; height: 28px; }
+.scan-tile.mini .mini-txt { flex: 1; min-width: 0; }
+.scan-tile.mini .tile-name { font-size: 19px; white-space: nowrap; }
+.scan-tile.mini .tile-sub { font-size: 13px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.scan-tile.mini .go { flex: none; }
+.scan-tile.mini .go .i { width: 18px; height: 18px; }
+.scan-tile.cam { --tile: var(--cam); --tile-bg: rgba(236, 72, 153, .14); }
+
+.seg.pink button.on { background: var(--cam); }
+.btn.pink { background: var(--cam); border-color: var(--cam); color: #fff; }
+.btn.pink:active { filter: brightness(.88); }
+.btn.cam-go { width: 146px; background: var(--cam); border-color: var(--cam); color: #fff; }
+.btn.cam-go:active { filter: brightness(.88); }
+.btn.cam-go.stop { background: transparent; border: 1.5px solid rgba(239, 68, 68, .55); color: #fca5a5; }
+.cam-bar .cam-ifaces { flex: none; }
+.cam-bar .cam-ifaces .seg { min-width: 240px; }
+.cam-bar .progress span { background: var(--cam); }
+
+.cam-list { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.cam-row { display: grid; grid-template-columns: minmax(0, 1.15fr) 146px 170px minmax(0, 1fr); column-gap: 12px;
+  align-items: center; min-height: 58px; padding: 6px 16px; border: 0; border-bottom: 1px solid var(--border);
+  background: transparent; text-align: left; width: 100%; flex: none; }
+.cam-row.head { min-height: 38px; background: var(--surface-2); border-radius: 15px 15px 0 0; font-size: 12px;
+  font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--dim); }
+.cam-row:not(.head):active { background: var(--pressed); }
+.cam-row.warn { background: rgba(245, 158, 11, .05); }
+.cam-row > span { min-width: 0; }
+.cam-row .two { display: flex; flex-direction: column; gap: 2px; }
+.cam-row .two b, .cam-row .two small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cam-row .two b { font-size: 17px; font-weight: 600; }
+.cam-row .two small { font-size: 13px; color: var(--dim); font-weight: 500; }
+.cam-row .two small.warn { color: #fcd34d; font-weight: 600; }
+.cam-row .num { font-variant-numeric: tabular-nums; }
+.cam-row .via { display: flex; flex-wrap: wrap; gap: 4px; }
+.cam-row .via .badge { margin-left: 0; height: 22px; padding: 0 7px; font-size: 11px; }
+.badge.kind { color: var(--text); background: var(--surface-3); }
+.badge.src-milesight { color: #fbcfe8; background: rgba(236, 72, 153, .2); }
+.badge.src-onvif { color: #bfdbfe; background: rgba(59, 130, 246, .2); }
+
+.grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px 12px; }
+.cam-strip .i.lead { color: var(--cam); }
+.cam-strip .txt b { display: flex; align-items: center; }
+.cam-strip .badge { height: 20px; font-size: 11px; padding: 0 7px; }
+#page-camip .card { gap: 10px; padding: 12px 16px; }
+#page-camip .grid3 { gap: 6px 12px; }
+#page-camip .footer.span2 { grid-column: span 2; align-self: end; margin-top: 0; }
+#page-camip .footer .hint { font-size: 13px; }
+.modal-head .i.i-camera { color: var(--cam); }
