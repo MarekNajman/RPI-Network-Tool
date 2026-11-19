@@ -8,6 +8,7 @@ tailscale.
 from __future__ import annotations
 
 import ipaddress
+import re
 from typing import Dict, Iterable, List, Optional, Tuple
 
 from .models import APConfig, IPv4Config, StationRequest
@@ -360,3 +361,61 @@ def validate_scan_range(network: str, prefix, local_nets, max_addresses: int = 1
     have = ", ".join("%s %s" % (n.iface, n.network) for n in local_nets) or "none"
     msg = "%s is not inside a directly connected network (%s)." % (net, have)
     raise ValidationError({"network": msg}, msg)
+
+
+# --------------------------------------------------------------------------- camera search / camera IP
+
+
+def validate_cam_iface(iface, local_nets):
+    """Interface for the camera search -> its LocalNet."""
+    name = str(iface or "").strip()
+    for local in local_nets:
+        if local.iface == name:
+            return local
+    have = ", ".join("%s %s" % (n.iface, n.network) for n in local_nets) or "none"
+    msg = ("Interface %s has no IPv4 network (directly connected: %s)." % (name, have) if name
+           else "Choose an interface.")
+    raise ValidationError({"iface": msg}, msg)
+
+
+_MAC_RE = re.compile(r"^[0-9a-fA-F]{2}([:-]?)[0-9a-fA-F]{2}(\1[0-9a-fA-F]{2}){4}$")
+
+
+def validate_camera_ip(body: dict) -> dict:
+    """New IP settings for a Milesight camera. Raises ValidationError.
+
+    -> {mac, address, netmask, prefix, gateway, dns, http_port, username, password}
+    """
+    errors: Errors = {}
+    mac = str(body.get("mac") or "").strip()
+    if not _MAC_RE.match(mac):
+        errors["mac"] = "Invalid camera MAC address"
+    cfg = IPv4Config(method="manual", address=str(body.get("address") or "").strip(),
+                     prefix=str(body.get("mask") or body.get("netmask") or "").strip(),
+                     gateway=str(body.get("gateway") or "").strip(),
+                     dns=[d for d in [str(body.get("dns") or "").strip()] if d])
+    out = None
+    try:
+        out = validate_ipv4_config(cfg, require_gateway=True)
+    except ValidationError as e:
+        for k, v in e.errors.items():
+            errors["mask" if k == "prefix" else k] = v
+    port_text = str(body.get("http_port") if body.get("http_port") is not None else "").strip()
+    port = int(port_text) if port_text.isdigit() else 0
+    if not 1 <= port <= 65535:
+        errors["http_port"] = "Port must be 1-65535"
+    user = str(body.get("username") or "")
+    if not user.strip():
+        errors["username"] = "User name is required"
+    elif len(user) > 32 or any(ord(c) < 32 for c in user):
+        errors["username"] = "Invalid user name"
+    password = str(body.get("password") or "")
+    if not password:
+        errors["password"] = "Password is required"
+    elif len(password) > 64 or any(ord(c) < 32 for c in password):
+        errors["password"] = "Invalid password"
+    if errors:
+        raise ValidationError(errors)
+    return {"mac": mac, "address": out.address, "prefix": out.prefix, "netmask": netmask_from_prefix(out.prefix),
+            "gateway": out.gateway, "dns": out.dns[0] if out.dns else "", "http_port": port,
+            "username": user.strip(), "password": password}

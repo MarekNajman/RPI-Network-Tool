@@ -11,6 +11,8 @@ import { createWifi } from './pages/wifi.js';
 import { createStation } from './pages/station.js';
 import { createTailscale } from './pages/tailscale.js';
 import { createScan } from './pages/scan.js';
+import { createCams } from './pages/cams.js';
+import { createCamIp } from './pages/camip.js';
 
 const POLL_MS = 4000;
 const PUBLIC_PAGES = new Set(['home']); // everything else needs the admin PIN
@@ -181,6 +183,8 @@ function boot() {
     station: createStation(app),
     ts: createTailscale(app),
     scan: createScan(app),
+    cams: createCams(app),
+    camip: createCamIp(app),
   };
   for (const p of Object.values(app.pages)) root.append(p.el);
   app._show('home', {});
