@@ -12,9 +12,12 @@ Přehledně ukazuje stav sítě a umožňuje ji nastavit přímo z displeje:
   `sudo tailscale set --advertise-routes=<síť>/<prefix>`.
 - **LAN scan** – najde zařízení v přímo připojené síti (rozsah předvyplněný podle eth0, lze změnit) a ukáže tabulku
   **Název / IP / MAC / Výrobce**; tlačítko **Scan / Stop**. Bez root práv a bez nmap.
+- **Cameras** – najde kamery a NVR **Milesight** (protokolem aplikace Smart Tools, i když mají adresu z **jiné podsítě**)
+  a **ONVIF** kamery dalších výrobců; detail kamery a u Milesight **Change IP** (IP, maska, brána, DNS, HTTP port).
+  Bez root práv, bez Wine a bez Smart Tools – viz [Kamery](#kamery-milesight-a-onvif).
 - Vlastní **on-screen klávesnice** (numerická pro IP adresy, QWERTY pro SSID/hesla) – v kiosku žádná systémová klávesnice není.
 - **Přihlášení PINem**: úvodní přehled je vidět bez hesla, každá další obrazovka (Ethernet, Wi-Fi, Tailscale, LAN scan)
-  vyžaduje admin PIN. Tlačítko **Logout** na úvodní obrazovce, **automatické odhlášení po 5 min nečinnosti**
+  vyžaduje admin PIN (i Cameras). Tlačítko **Logout** na úvodní obrazovce, **automatické odhlášení po 5 min nečinnosti**
   (30 s předem varování), zámek po 5 špatných pokusech.
 - Běží jako **služba po bootu ve fullscreenu**; z dotykového displeje ji nejde zavřít ani minimalizovat.
 
@@ -31,6 +34,8 @@ GUI je v angličtině, tato dokumentace v češtině.
 | ![](docs/screenshots/21-login.png) | ![](docs/screenshots/23-home-logged-in.png) | ![](docs/screenshots/24-idle-warning.png) |
 | **LAN scan – výsledky** | **LAN scan – detail zařízení** | **LAN scan – rozsah mimo lokální síť** |
 | ![](docs/screenshots/28-scan-results.png) | ![](docs/screenshots/30-scan-detail.png) | ![](docs/screenshots/33-scan-not-local.png) |
+| **Cameras – výsledky** | **Kamera v jiné podsíti** | **Change IP (Milesight)** |
+| ![](docs/screenshots/36-cams-results.png) | ![](docs/screenshots/38-cam-detail-other-subnet.png) | ![](docs/screenshots/39-camip-form.png) |
 
 Všechny obrazovky jsou v [`docs/screenshots/`](docs/screenshots/) (vygenerované v demo režimu, 800 × 480).
 
@@ -53,14 +58,15 @@ Všechny obrazovky jsou v [`docs/screenshots/`](docs/screenshots/) (vygenerovan�
 6. [Kiosk: služba po bootu, fullscreen, nejde zavřít](#kiosk-služba-po-bootu-fullscreen-nejde-zavřít)
 7. [Ovládání GUI](#ovládání-gui)
 8. [LAN scan: jak funguje a co od něj čekat](#lan-scan-jak-funguje-a-co-od-něj-čekat)
-9. [Přihlášení: admin PIN a automatické odhlášení](#přihlášení-admin-pin-a-automatické-odhlášení)
-10. [Bezpečnost a oprávnění](#bezpečnost-a-oprávnění)
-11. [Konfigurace](#konfigurace)
-12. [Vývoj a testy na PC (demo režim)](#vývoj-a-testy-na-pc-demo-režim)
-13. [Řešení problémů](#řešení-problémů)
-14. [Známá omezení a kritické poznámky](#známá-omezení-a-kritické-poznámky)
-15. [Aktualizace a odinstalace](#aktualizace-a-odinstalace)
-16. [Licence a zdroje](#licence-a-zdroje)
+9. [Kamery: Milesight a ONVIF](#kamery-milesight-a-onvif)
+10. [Přihlášení: admin PIN a automatické odhlášení](#přihlášení-admin-pin-a-automatické-odhlášení)
+11. [Bezpečnost a oprávnění](#bezpečnost-a-oprávnění)
+12. [Konfigurace](#konfigurace)
+13. [Vývoj a testy na PC (demo režim)](#vývoj-a-testy-na-pc-demo-režim)
+14. [Řešení problémů](#řešení-problémů)
+15. [Známá omezení a kritické poznámky](#známá-omezení-a-kritické-poznámky)
+16. [Aktualizace a odinstalace](#aktualizace-a-odinstalace)
+17. [Licence a zdroje](#licence-a-zdroje)
 
 ---
 
@@ -79,6 +85,7 @@ Všechny obrazovky jsou v [`docs/screenshots/`](docs/screenshots/) (vygenerovan�
  │           ├─ nmcli ──────────▶ NetworkManager (povoleno polkit pravidlem)
  │           ├─ tailscale status ▶ tailscaled (čtení bez root)           │
  │           ├─ UDP → ARP, ip -j neigh ▶ LAN scan (bez root)             │
+ │           ├─ UDP multicast :26360 / :3702 ▶ kamery Milesight / ONVIF  │
  │           └─ sudo netpanel-ts-routes ▶ tailscale set --advertise-routes
  └───────────────────────────────────────────────────────────────────────┘
 ```
@@ -111,6 +118,7 @@ RPI-5inchLCD-Net/
 │       ├── nmparse.py            parser výstupu `nmcli -t`
 │       ├── tailscale.py          tailscale status + advertise routes
 │       ├── lanscan.py            LAN scan: ARP discovery, výrobce podle MAC, názvy (mDNS/NetBIOS/DNS); CLI pro SSH
+│       ├── cameras.py            kamery: protokol Milesight (Smart Tools) + ONVIF WS-Discovery, změna IP; CLI pro SSH
 │       ├── system.py             hostname, teplota CPU
 │       ├── runner.py             spouštění příkazů (timeouty, logování, maskování hesel)
 │       └── demo.py               simulovaný backend pro vývoj na PC
@@ -141,6 +149,7 @@ RPI-5inchLCD-Net/
 │   └── netpanel.default          /etc/default/netpanel (rozhraní, port)
 ├── tests/                        unit testy (Python + JS)
 ├── tools/screenshots.py          UI smoke test + screenshoty (Playwright, jen pro vývoj)
+├── docs/milesight-protocol.md     popis protokolu Milesight (hledání kamer, změna IP)
 └── docs/screenshots/             obrázky obrazovek
 ```
 
@@ -550,7 +559,7 @@ sudo systemctl set-default graphical.target && sudo reboot
 
 **Home** – dvě dlaždice nahoře (Ethernet, Wi-Fi) s aktuálním stavem, IP a bránou/SSID; dole sekce Tailscale
 s IP v tailnetu, advertised routou (APPROVED / PENDING) a velkým tlačítkem **Advertise subnet**, vpravo dole
-dlaždice **LAN scan**.
+dvě menší dlaždice **LAN scan** a **Cameras**.
 Stav se obnovuje každé 4 s. Vpravo nahoře teplota CPU a čas.
 
 **Ethernet** – vlevo stav linky (rychlost, MAC, profil, DNS), vpravo přepínač **DHCP / Static IP**.
@@ -585,6 +594,16 @@ naposledy skenovaný rozsah), stav skenu a tlačítko **Scan** (během skenu **S
 všechny nalezené názvy a jejich zdroj). Když rozsah není v přímo připojené síti nebo je větší než /22,
 zobrazí se důvod a tlačítka se sítěmi, které skenovat jde (např. `eth0 · 192.168.10.0/24`, `wlan0 · 10.42.0.0/24`).
 Detaily viz [LAN scan](#lan-scan-jak-funguje-a-co-od-něj-čekat).
+
+**Cameras** – nahoře přepínač rozhraní (**eth0 / wlan0**), stav a tlačítko **Search** (během hledání **Stop**,
+hledání trvá ~4 s). Tabulka **Device · IP address · MAC / vendor · Found via** (štítky IPC / NVR,
+MILESIGHT, ONVIF); žlutě označené řádky jsou kamery **v jiné podsíti** nebo **neaktivované**. Klepnutí na řádek
+otevře detail (model, název, IP / maska, brána, DNS, HTTP/HTTPS port, firmware, HW, sériové číslo, stav aktivace,
+ONVIF adresa) s upozorněním, co je potřeba udělat. U zařízení Milesight je v detailu tlačítko **Change IP** →
+formulář **New IP address · Subnet mask · Gateway · DNS server · HTTP port · Camera user · Camera password**
+(u kamery z jiné podsítě se předvyplní maska a brána sítě eth0). **Apply** → potvrzení se souhrnem → odeslání
+a čekání na potvrzení od kamery (max. ~10 s). Po úspěchu se za 3,5 s samo spustí nové hledání.
+Detaily viz [Kamery](#kamery-milesight-a-onvif).
 
 Spuštěné příkazy (pro kontrolu v `journalctl -u netpanel`), např.:
 
@@ -655,6 +674,88 @@ ip -4 neigh show dev eth0          # co jádro ví o sousedech (REACHABLE = odpo
 Když vypíše `directly connected: none`, hned pod tím vypíše všechna rozhraní z `ip -j addr show` a důvod,
 proč je přeskočil (`interface is down`, `no IPv4 network address`, `no ARP (LOOPBACK)` …).
 
+## Kamery: Milesight a ONVIF
+
+Obrazovka **Cameras** nahrazuje na Raspberry Pi základní funkce aplikace **Milesight Smart Tools**, která existuje
+jen pro Windows a macOS: hledání kamer a NVR v síti a změnu jejich IP adresy. Smart Tools je 32bitová Windows
+aplikace (Qt5 + MFC + uzavřené knihovny Milesight); bez zdrojových kódů ji pro Linux přeložit nejde, a provoz přes
+Wine + emulaci x86 na Pi 4 by byl pomalý a křehký. NetPanel proto mluví se zařízeními přímo, stejným síťovým
+protokolem.
+
+### Jak to funguje (bez root práv, bez dalších balíčků)
+
+1. **Protokol Milesight (ze Smart Tools).** UDP multicast `239.255.255.250`, port **26360** (zdrojový port také
+   26360). Zpráva = XML dokument + 2 bajty kontrolního součtu (16bitový součet v jedničkovém doplňku, jako u IP
+   hlavičky). Panel pošle dotaz `<Query><Id>…</Id><Types>search</Types></Query>` (zvlášť pro kamery a pro NVR,
+   třikrát během ~2 s – UDP se může ztratit). Kamery odpovídají `<Reply>` s IP, maskou, bránou, DNS, porty,
+   modelem, firmwarem, MAC, sériovým číslem a stavem aktivace. **Odpovědi chodí také multicastem**, takže se
+   najdou i kamery s adresou z jiné podsítě (typicky `192.168.5.190` po továrním resetu).
+   **Change IP** = zpráva `<Types>modify</Types>` adresovaná **MAC adresou** kamery (funguje tedy i přes hranici
+   podsítě); obsahuje novou IP, masku, bránu, DNS, HTTP port, název zařízení, uživatele a **MD5 hash hesla** –
+   přesně jako Smart Tools. Kamera odpoví `Result` = `success` / `failed`.
+2. **ONVIF WS-Discovery.** Probe na `239.255.255.250:3702` (typy `NetworkVideoTransmitter` a `Device`).
+   Odpovídá každá kamera se zapnutým ONVIF, ale **unicastem** – takže jen ze stejné podsítě. Ze zprávy se vezme
+   adresa služby, název a model (ONVIF „scopes“); MAC a výrobce se doplní z ARP tabulky a registru IEEE
+   (stejně jako u LAN scanu).
+3. Zařízení nalezené oběma cestami se sloučí (údaje Milesight mají přednost). Výsledek se drží jen v paměti služby.
+
+### Odkud je protokol a co není ověřené (důležité)
+
+- Protokol Milesight **není veřejně dokumentovaný**. Odvodil jsem ho statickou analýzou instalátoru
+  *Milesight Smart Tools 2.4.0.5-r30* (Windows) za účelem interoperability: port a multicast adresa, rozvržení
+  XML a názvy polí, výpočet kontrolního součtu (unit test ho porovnává s dekompilovanou funkcí ze Smart Tools),
+  formát pole `Id` (MAC panelu + GUID) a MD5 hesla u `modify`. Technické detaily (zprávy, pole, adresy funkcí
+  ve Smart Tools pro dohledání): [`docs/milesight-protocol.md`](docs/milesight-protocol.md).
+- **Ověřeno:** unit testy, test proti **simulované kameře** přes skutečné multicastové sockety na Linuxu, celé UI
+  v demo režimu (800 × 480).
+- **Neověřeno na reálné kameře:** přesná podoba odpovědí konkrétních firmwarů, jestli kamera odpovídá multicastem,
+  nebo unicastem, a jestli novější firmware nevyžaduje pro `modify` jiný (šifrovaný) postup – Smart Tools obsahuje
+  i mechanismus challenge / RSA klíč (používá ho pro aktivaci), ten NetPanel neimplementuje.
+- **První test proto dělej přes SSH** s ladicím výstupem (níže) a IP měň nejdřív na testovací kameře, ke které
+  máš fyzický přístup (reset tlačítkem).
+
+### Ladění přes SSH
+
+Stejný kód jako panel:
+
+```bash
+cd /opt/netpanel && sudo -u netpanel python3 -m netpanel.backend.cameras                # hledání na eth0, tabulka
+cd /opt/netpanel && sudo -u netpanel python3 -m netpanel.backend.cameras wlan0 --debug  # + každý přijatý paket (hex + XML)
+cd /opt/netpanel && sudo -u netpanel python3 -m netpanel.backend.cameras --json --time 6
+# změna IP z příkazové řádky - heslo se zeptá interaktivně (nezůstane v historii shellu):
+cd /opt/netpanel && sudo -u netpanel python3 -m netpanel.backend.cameras eth0 \
+    --set-ip 1c:c3:16:xx:xx:xx --ip 192.168.10.64 --mask 255.255.255.0 --gw 192.168.10.1
+```
+
+V `--debug` výstupu se pole `<Password>` maskuje. Provoz na drátě: `sudo tcpdump -i eth0 -n -X 'udp port 26360 or udp port 3702'`
+(balíček `tcpdump`). Pokud Milesight kamera neodpoví, nebo odpoví jinak, než NetPanel čeká, výstup `--debug`
+je přesně to, co je potřeba k opravě.
+
+### Co od toho (ne)čekat
+
+| Situace | Realita |
+|---|---|
+| Milesight kamera / NVR ve stejné síti | Najde se (protokol Milesight, obvykle i ONVIF). |
+| Milesight v jiné podsíti (např. `192.168.5.190`) | Najde se (multicast), řádek je žlutě *other subnet*. Webové rozhraní z panelu neotevřeš, dokud jí nezměníš IP do své sítě. |
+| Neaktivovaná kamera (nová / po resetu) | Najde se, *not activated*. **Aktivaci (nastavení hesla) NetPanel neumí** – udělej ji ve webovém rozhraní kamery nebo ve Smart Tools. Neaktivovaná kamera změnu IP pravděpodobně odmítne (neověřeno). |
+| Kamera jiné značky | Jen přes ONVIF, jen ve stejné podsíti, **bez změny IP**. ONVIF bývá z výroby vypnutý (např. Hikvision) – pak se nenajde. |
+| Wi-Fi s izolací klientů, switch s IGMP snoopingem bez querieru, „CCTV/VLAN mode“ na PoE switchi | Multicast nemusí projít. Milesight doporučuje u switche standardní režim a zapnutý multicast. Hledej přes eth0. |
+| Kamery za routerem / v jiné VLAN | Nenajdou se – multicast má TTL 1, záměrně jen lokální segment. |
+| Raw-Ethernet režim Smart Tools (WinPcap, ethertype `0x0809`) | Není implementovaný (vyžadoval by root / `CAP_NET_RAW`). Smart Tools ho používá jako alternativu k multicastu. |
+| Firmware upgrade, aktivace, reset, licence, fisheye nastavení | Není – to zůstává ve webovém rozhraní kamery / Smart Tools. |
+
+### Bezpečnost
+
+- Hledání i změna IP jsou jen po přihlášení PINem. Výsledek hledání (IP, MAC, modely, firmware, sériová čísla)
+  je **bezpečnostně citlivá inventura** kamerového systému – drží se jen v paměti a na úvodní obrazovce se neukazuje.
+- Heslo kamery se nikam neukládá, do logu se nepíše a po odeslání se z formuláře vymaže.
+- **Ale:** protokol Milesight posílá uživatelské jméno a **MD5 hash hesla multicastem bez šifrování** (stejně jako
+  Smart Tools). Kdokoli ve stejném segmentu ho může zachytit; MD5 bez soli jde u slabého hesla zpětně uhodnout
+  a zachycený příkaz lze zopakovat. Změnu IP proto dělej v důvěryhodné síti (ideálně oddělená síť pro kamery)
+  a kamerám dávej silná hesla.
+- **Ve firemní síti hledání spouštěj jen se souhlasem správce sítě / IT** – multicastový dotaz uvidí všechna
+  zařízení v segmentu.
+
 ## Přihlášení: admin PIN a automatické odhlášení
 
 | Stav | Co jde |
@@ -707,6 +808,8 @@ Rizika, o kterých máš vědět:
   Na jednoúčelovém zařízení bez dalších uživatelů je to přijatelné, v logu je maskované.
 - Heslo AP je v GUI vidět v čitelné podobě (aby ho šlo nadiktovat) – skryješ ho ikonou oka.
 - Polkit pravidlo dává uživateli `netpanel` plnou správu NetworkManageru. Kompromitace tohoto účtu = změna sítě.
+- Změna IP kamery posílá MD5 hash hesla kamery multicastem nešifrovaně (vlastnost protokolu Milesight) –
+  viz [Kamery → Bezpečnost](#bezpečnost-1).
 - Lokální uživatel na Pi se SSH přístupem PIN nepotřebuje – má `nmcli`/`sudo` přímo. PIN chrání dotykový panel,
   ne systém. Na Pi proto nedávej účty lidem, kteří nemají mít správu sítě.
 
@@ -743,13 +846,14 @@ python3 -m netpanel --demo
 ```
 
 V demu je admin PIN **`123456`** (login to i napíše). Chybové stavy: heslo `wrongpass` při připojení k Wi-Fi
-simuluje špatné heslo (dialog + návrat k předchozímu spojení). Rychlejší test auto-logoutu:
+simuluje špatné heslo (dialog + návrat k předchozímu spojení); heslo `wrong` při **Change IP** kamery
+simuluje odmítnutí kamerou. Rychlejší test auto-logoutu:
 `python3 -m netpanel --demo --idle-timeout 40`.
 
 Testy:
 
 ```bash
-python3 -m unittest discover -s tests -t .     # validace, parser nmcli, příkazy nmcli + rollback, HTTP API
+python3 -m unittest discover -s tests -t .     # validace, parser nmcli, příkazy nmcli + rollback, HTTP API, kamery
 node tests/test_validate.mjs                    # validace ve frontendu
 python3 tools/screenshots.py                    # průchod UI + screenshoty (vyžaduje Playwright + Chromium)
 ```
@@ -787,13 +891,17 @@ python3 tools/screenshots.py                    # průchod UI + screenshoty (vy�
 | LAN scan: „not inside a directly connected network“ | Rozsah musí ležet v síti eth0/wlan0 (viz tlačítka pod hláškou). Sítě za routerem skenovat nejde – záměrně. |
 | LAN scan najde jen bránu / skoro nic přes Wi-Fi | Wi-Fi síť má izolaci klientů – ARP na ostatní klienty neprojde. Skenuj přes eth0. |
 | LAN scan: prázdné názvy | Normální, viz [Co od toho čekat](#co-od-toho-nečekat). Kontrola z SSH: `sudo -u netpanel python3 -m netpanel.backend.lanscan`. |
+| Cameras: „UDP port 26360 is in use by another program“ | Port drží jiný program (druhá instance CLI, Smart Tools ve Wine …). Ukončí ho a hledej znovu: `sudo ss -ulpn 'sport = :26360'`. |
+| Cameras: Milesight kameru nenajde, Smart Tools na Windows ano | Spusť `python3 -m netpanel.backend.cameras eth0 --debug` (viz [Ladění](#ladění-přes-ssh-1)) – ukáže, jestli odpověď vůbec přišla. Zkontroluj multicast na switchi, izolaci klientů na Wi-Fi, hledej přes eth0. |
+| Change IP: „No answer from the camera“ | Kamera je offline, multicast neprošel, nebo její firmware tenhle příkaz nepodporuje → změň IP ve webovém rozhraní kamery. |
+| Change IP: „The camera refused the change“ | Špatný uživatel / heslo, nebo kamera ještě není aktivovaná. |
 | Po změně IP na eth0 jsem ztratil SSH | Očekávané – SSH běželo přes starou adresu. Připoj se na novou IP (je vidět na displeji). |
 
 ## Známá omezení a kritické poznámky
 
 Tohle je poctivý seznam slabin – rozhodni, co z toho je pro tvoje nasazení problém:
 
-1. **Neotestováno na reálném HW.** Testováno: unit testy (93), parsování výstupu `nmcli`, generované příkazy,
+1. **Neotestováno na reálném HW.** Testováno: unit testy (119), parsování výstupu `nmcli`, generované příkazy,
    rollback, HTTP API včetně přihlášení, celé UI v Chromiu 800 × 480 s demo backendem (login, špatný PIN,
    varování a auto-logout, odhlášení se zavřením otevřené klávesnice); backend prošel nezávislou revizí.
    Výstup `nmcli` se čte s `--escape no` – formát se mezi verzemi NetworkManageru může mírně lišit. Neověřeno: chování na Pi 4 s tímto
@@ -828,6 +936,9 @@ Tohle je poctivý seznam slabin – rozhodni, co z toho je pro tvoje nasazení p
     Mechanismus „UDP → ARP → tabulka sousedů“ je ověřený na reálném Linuxovém jádře, **celý sken na Pi
     v reálné síti zatím ne** – první sken porovnej s tím, co víš o síti (nebo s `arp-scan`, pokud ho máš).
     Výsledky se neukládají na disk; po restartu služby jsou pryč.
+16. **Kamery** – protokol Milesight je odvozený ze Smart Tools (není veřejně dokumentovaný) a **na reálné kameře
+    zatím neověřený** – viz [Odkud je protokol](#odkud-je-protokol-a-co-není-ověřené-důležité). Aktivace,
+    firmware upgrade a raw-Ethernet režim chybí; změna IP jen pro Milesight; u ONVIF jen stejná podsíť.
 
 ## Aktualizace a odinstalace
 
